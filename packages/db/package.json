@@ -1,0 +1,25 @@
+{
+  "name": "@tango/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "drizzle-kit": "0.31.10",
+    "drizzle-orm": "0.45.2",
+    "postgres": "3.4.9",
+    "uuid": "14.0.1"
+  },
+  "devDependencies": {
+    "auth": "1.6.25",
+    "typescript": "7.0.2"
+  }
+}
