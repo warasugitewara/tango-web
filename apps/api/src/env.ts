@@ -9,6 +9,14 @@ const environmentSchema = z.object({
   GUEST_TOKEN_PEPPER_FILE: z.string().min(1),
   /** Cloudflare Turnstileのシークレットを格納したファイルのパス。 */
   TURNSTILE_SECRET_FILE: z.string().min(1),
+  /** Better Authの署名・暗号化に使うシークレットを格納したファイルのパス。 */
+  BETTER_AUTH_SECRET_FILE: z.string().min(1),
+  GOOGLE_CLIENT_ID: z.string().min(1),
+  /** GoogleのOAuthクライアントシークレットを格納したファイルのパス。 */
+  GOOGLE_CLIENT_SECRET_FILE: z.string().min(1),
+  GITHUB_CLIENT_ID: z.string().min(1),
+  /** GitHubのOAuthクライアントシークレットを格納したファイルのパス。 */
+  GITHUB_CLIENT_SECRET_FILE: z.string().min(1),
 })
 
 export type Env = Readonly<z.infer<typeof environmentSchema>>

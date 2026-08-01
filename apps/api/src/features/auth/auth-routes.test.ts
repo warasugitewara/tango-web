@@ -91,6 +91,12 @@ function createHarness(options: {
     clock: { now: () => NOW },
     guestService,
     actorResolver,
+    identityCompletionService: {
+      async complete() {
+        throw new Error('このテストでは使用しない。')
+      },
+    },
+    authHandler: async () => new Response(null, { status: 204 }),
     cookieSecure: options.cookieSecure ?? true,
   })
 
@@ -332,6 +338,12 @@ describe('request context and error handling', () => {
           return null
         },
       },
+      identityCompletionService: {
+        async complete() {
+          throw new Error('このテストでは使用しない。')
+        },
+      },
+      authHandler: async () => new Response(null, { status: 204 }),
       cookieSecure: true,
     })
 

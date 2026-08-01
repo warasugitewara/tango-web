@@ -169,6 +169,24 @@ async function ensureUserSettings(
     .onConflictDoNothing({ target: userSettings.principalId })
 }
 
+/**
+ * ゲストprincipalが所有するドメイン行を正式principalへ移す拡張点。
+ * `completeIdentity` と同じトランザクション内で呼ばれる。
+ * Phase 1ではデッキやカードのテーブルがまだ無いため移送対象は存在せず、
+ * 統合の事実は同トランザクションの `identity_merges` 行が記録する。
+ * Phase 2でテーブルを追加する際は、この関数の中だけを拡張すれば原子性が保たれる。
+ */
+export async function moveOwnedDomainRows(
+  sourcePrincipalId: string,
+  targetPrincipalId: string,
+  _tx: DatabaseTransaction,
+): Promise<void> {
+  if (sourcePrincipalId === targetPrincipalId) {
+    return
+  }
+  // Phase 1: 移送対象のドメインテーブルはまだ存在しない。
+}
+
 export function createPrincipalRepository(db: Database): PrincipalRepository {
   return {
     async findByUserId(userId) {
@@ -304,7 +322,7 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
               guestRow !== undefined && guestRow.principalId !== formalRow.id
 
             if (isSeparateGuest) {
-              // Phase 2以降、所有データの移送を同じトランザクションへ追加する。
+              await moveOwnedDomainRows(guestRow.principalId, formalRow.id, tx)
               await revokeGuestSession()
               await recordMerge(formalRow.id, guestRow.principalId)
               return {

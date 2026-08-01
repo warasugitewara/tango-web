@@ -2,42 +2,72 @@ import { createDatabase, createPrincipalRepository } from '@tango/db'
 import { createApp } from './app'
 import { loadEnv, readSecretFile } from './env'
 import { createActorResolver } from './features/auth/actor-resolver'
+import { createAuth } from './features/auth/better-auth'
+import { createFormalSessionReader } from './features/auth/formal-session-reader'
 import {
   createGuestService,
   createGuestTokenCodec,
   createSystemClock,
 } from './features/auth/guest-service'
+import { createIdentityCompletionService } from './features/auth/identity-completion-service'
 import { createTurnstileVerifier } from './features/auth/turnstile-client'
 
 const env = loadEnv(Bun.env)
 
-const [guestTokenPepper, turnstileSecret] = await Promise.all([
+const [
+  guestTokenPepper,
+  turnstileSecret,
+  betterAuthSecret,
+  googleClientSecret,
+  githubClientSecret,
+] = await Promise.all([
   readSecretFile(env.GUEST_TOKEN_PEPPER_FILE),
   readSecretFile(env.TURNSTILE_SECRET_FILE),
+  readSecretFile(env.BETTER_AUTH_SECRET_FILE),
+  readSecretFile(env.GOOGLE_CLIENT_SECRET_FILE),
+  readSecretFile(env.GITHUB_CLIENT_SECRET_FILE),
 ])
+
+const cookieSecure = new URL(env.APP_ORIGIN).protocol === 'https:'
 
 const database = createDatabase(env.DATABASE_URL)
 const repository = createPrincipalRepository(database.db)
 const clock = createSystemClock()
+const tokenCodec = createGuestTokenCodec(guestTokenPepper)
 
-const guestService = createGuestService({
-  repository,
-  clock,
-  turnstile: createTurnstileVerifier({ secret: turnstileSecret }),
-  tokenCodec: createGuestTokenCodec(guestTokenPepper),
-})
-
-// 正式セッションの読み取りはTask 5でBetter Authに接続する。
-const actorResolver = createActorResolver({
-  repository,
-  formalSessionReader: { read: async () => null },
+const auth = createAuth({
+  db: database.db,
+  appOrigin: env.APP_ORIGIN,
+  secret: betterAuthSecret,
+  google: {
+    clientId: env.GOOGLE_CLIENT_ID,
+    clientSecret: googleClientSecret,
+  },
+  github: {
+    clientId: env.GITHUB_CLIENT_ID,
+    clientSecret: githubClientSecret,
+  },
+  useSecureCookies: cookieSecure,
 })
 
 const app = createApp({
   clock,
-  guestService,
-  actorResolver,
-  cookieSecure: new URL(env.APP_ORIGIN).protocol === 'https:',
+  guestService: createGuestService({
+    repository,
+    clock,
+    turnstile: createTurnstileVerifier({ secret: turnstileSecret }),
+    tokenCodec,
+  }),
+  actorResolver: createActorResolver({
+    repository,
+    formalSessionReader: createFormalSessionReader(auth),
+  }),
+  identityCompletionService: createIdentityCompletionService({
+    repository,
+    tokenCodec,
+  }),
+  authHandler: (request) => auth.handler(request),
+  cookieSecure,
 })
 
 const server = Bun.serve({ fetch: app.fetch })

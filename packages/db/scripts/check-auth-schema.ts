@@ -13,15 +13,9 @@ const CLI_PACKAGE = 'auth@1.6.25'
 const CONFIG_PATH = 'apps/api/src/features/auth/better-auth.config.ts'
 const CHECKED_IN_PATH = 'packages/db/src/schema/auth.generated.ts'
 
-// 生成にのみ使う非機密のプレースホルダ。DB接続もOAuthも発生しない。
-const GENERATION_ONLY_ENV: Record<string, string> = {
-  APP_ENV: 'development',
-  APP_ORIGIN: 'https://tango.warasugi.com',
-  DATABASE_URL: 'postgres://schema-generation-only@127.0.0.1:5432/unused',
-}
-
 const repositoryRoot = resolve(import.meta.dir, '..', '..', '..')
 
+// 設定はダミー値で完結するため環境変数の注入は不要。呼び出し元の環境をそのまま渡す。
 function buildEnv(): Record<string, string> {
   const env: Record<string, string> = {}
 
@@ -29,10 +23,6 @@ function buildEnv(): Record<string, string> {
     if (value !== undefined) {
       env[key] = value
     }
-  }
-
-  for (const [key, value] of Object.entries(GENERATION_ONLY_ENV)) {
-    env[key] ??= value
   }
 
   return env

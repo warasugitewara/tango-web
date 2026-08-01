@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { ActorResolver } from './features/auth/actor-resolver'
 import { createAuthRoutes } from './features/auth/auth-routes'
 import type { Clock, GuestService } from './features/auth/guest-service'
+import type { IdentityCompletionService } from './features/auth/identity-completion-service'
 import { errorHandler } from './middleware/error-handler'
 import {
   type AppEnv,
@@ -13,6 +14,9 @@ export type AppDependencies = {
   clock: Clock
   guestService: GuestService
   actorResolver: ActorResolver
+  identityCompletionService: IdentityCompletionService
+  /** Better Authのリクエストハンドラ。`/api/auth/*` をそのまま委譲する。 */
+  authHandler: (request: Request) => Promise<Response>
   /** 本番のHTTPS配信では true。ローカルのHTTP検証でのみ false にする。 */
   cookieSecure: boolean
 }
@@ -22,6 +26,13 @@ export function createApp(deps: AppDependencies) {
 
   app.onError(errorHandler())
   app.use('*', requestId())
+
+  // Better Authは自前の文脈解決より先に置く。
+  // 失効したゲストCookieが残っていてもログインを妨げないようにするため。
+  app.on(['GET', 'POST'], '/api/auth/*', (context) =>
+    deps.authHandler(context.req.raw),
+  )
+
   // ヘルスチェックは認証文脈を必要としないので /api 配下だけに適用する。
   app.use(
     '/api/*',
@@ -39,6 +50,7 @@ export function createApp(deps: AppDependencies) {
     '/api',
     createAuthRoutes({
       guestService: deps.guestService,
+      identityCompletionService: deps.identityCompletionService,
       cookieSecure: deps.cookieSecure,
     }),
   )

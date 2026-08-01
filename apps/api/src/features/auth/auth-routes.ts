@@ -1,9 +1,9 @@
 import { zValidator } from '@hono/zod-validator'
 import { AppError } from '@tango/shared'
 import { Hono } from 'hono'
-import { setCookie } from 'hono/cookie'
+import { getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
-import type { AppEnv } from '../../middleware/request-context'
+import { type AppEnv, clearGuestCookie } from '../../middleware/request-context'
 import {
   type SessionView,
   toGuestSessionView,
@@ -15,18 +15,25 @@ import {
   GUEST_SESSION_MAX_AGE_SECONDS,
   type GuestService,
 } from './guest-service'
+import type { IdentityCompletionService } from './identity-completion-service'
 
 const guestStartSchema = z.object({
   turnstileToken: z.string().min(1),
 })
 
+const identityCompleteSchema = z.object({
+  /** OAuthコールバックごとに一意な冪等性キー。 */
+  mergeKey: z.uuid(),
+})
+
 export type AuthRoutesOptions = {
   guestService: GuestService
+  identityCompletionService: IdentityCompletionService
   cookieSecure: boolean
 }
 
 export function createAuthRoutes(options: AuthRoutesOptions) {
-  const { guestService, cookieSecure } = options
+  const { guestService, identityCompletionService, cookieSecure } = options
 
   return new Hono<AppEnv>()
     .post(
@@ -84,4 +91,38 @@ export function createAuthRoutes(options: AuthRoutesOptions) {
 
       return context.json({ authenticated: false } satisfies SessionView)
     })
+    .post(
+      '/identity/complete',
+      zValidator('json', identityCompleteSchema, (result) => {
+        if (!result.success) {
+          throw new AppError('VALIDATION_FAILED', {
+            fieldErrors: z.flattenError(result.error).fieldErrors,
+          })
+        }
+      }),
+      async (context) => {
+        const formalSession = context.get('formalSession')
+
+        if (formalSession === null) {
+          throw new AppError('UNAUTHENTICATED')
+        }
+
+        const { mergeKey } = context.req.valid('json')
+        const guestRawToken = getCookie(context, GUEST_COOKIE_NAME) ?? null
+
+        const { outcome } = await identityCompletionService.complete({
+          userId: formalSession.userId,
+          guestRawToken,
+          mergeKey,
+          now: context.get('now'),
+        })
+
+        // 取り込みが成功したあとだけゲストCookieを捨てる。
+        if (guestRawToken !== null) {
+          clearGuestCookie(context, cookieSecure)
+        }
+
+        return context.json({ outcome })
+      },
+    )
 }
