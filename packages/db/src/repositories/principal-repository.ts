@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNull, lte } from 'drizzle-orm'
+import { and, eq, gt, inArray, isNull, lte, notExists } from 'drizzle-orm'
 import { v7 as uuidv7 } from 'uuid'
 import type { Database, DatabaseTransaction } from '../client'
 import {
@@ -524,40 +524,68 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
     },
 
     async purgeExpiredGuests({ now, limit }) {
-      // 正式ユーザーが紐づいたprincipalは kind='user' かつ user_id が非NULLになるため、
-      // ここで選ばれることはない。所有データはFKのcascadeで一緒に消える。
-      const candidates = await db
-        .select({ id: principals.id })
-        .from(principals)
-        .innerJoin(guestSessions, eq(guestSessions.principalId, principals.id))
-        .where(
-          and(
-            eq(principals.kind, 'guest'),
-            isNull(principals.userId),
-            lte(guestSessions.expiresAt, now),
-          ),
-        )
-        .limit(limit)
-
-      if (candidates.length === 0) {
-        return { deletedPrincipals: 0 }
-      }
-
-      const deleted = await db
-        .delete(principals)
-        .where(
-          and(
-            inArray(
-              principals.id,
-              candidates.map((row) => row.id),
+      // 選定と削除を同じトランザクションにまとめ、確保した行のロックを
+      // 削除まで保持する。別々のautocommitで実行すると、その隙間で
+      // 期限が延長された利用中のゲストを消してしまう。
+      return db.transaction(async (tx) => {
+        // 正式ユーザーが紐づいたprincipalは kind='user' かつ user_id が非NULLになるため、
+        // ここで選ばれることはない。所有データはFKのcascadeで一緒に消える。
+        // SKIP LOCKED により、他の処理が触っている行は待たずに次回へ回す。
+        // 掃除ジョブが利用者側のリクエストを止めず、デッドロックにも巻き込まれない。
+        const candidates = await tx
+          .select({ id: principals.id })
+          .from(principals)
+          .innerJoin(
+            guestSessions,
+            eq(guestSessions.principalId, principals.id),
+          )
+          .where(
+            and(
+              eq(principals.kind, 'guest'),
+              isNull(principals.userId),
+              lte(guestSessions.expiresAt, now),
             ),
-            eq(principals.kind, 'guest'),
-            isNull(principals.userId),
-          ),
-        )
-        .returning({ id: principals.id })
+          )
+          .limit(limit)
+          .for('update', {
+            of: [principals, guestSessions],
+            skipLocked: true,
+          })
 
-      return { deletedPrincipals: deleted.length }
+        if (candidates.length === 0) {
+          return { deletedPrincipals: 0 }
+        }
+
+        const deleted = await tx
+          .delete(principals)
+          .where(
+            and(
+              inArray(
+                principals.id,
+                candidates.map((row) => row.id),
+              ),
+              eq(principals.kind, 'guest'),
+              isNull(principals.userId),
+              // ロックを持っていても期限を削除時点で再確認する。
+              // 有効なセッションが残っている限り、その principal は消さない。
+              notExists(
+                tx
+                  .select({ id: guestSessions.id })
+                  .from(guestSessions)
+                  .where(
+                    and(
+                      eq(guestSessions.principalId, principals.id),
+                      isNull(guestSessions.revokedAt),
+                      gt(guestSessions.expiresAt, now),
+                    ),
+                  ),
+              ),
+            ),
+          )
+          .returning({ id: principals.id })
+
+        return { deletedPrincipals: deleted.length }
+      })
     },
   }
 }

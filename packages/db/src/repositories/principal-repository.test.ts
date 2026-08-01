@@ -12,6 +12,15 @@ import {
 
 const GUEST_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
 
+/** 並行トランザクションの進行順を固定するための一度きりの合図。 */
+function createGate(): { wait: Promise<void>; open: () => void } {
+  let open: () => void = () => {}
+  const wait = new Promise<void>((resolve) => {
+    open = resolve
+  })
+  return { wait, open }
+}
+
 describe('PrincipalRepository', () => {
   let handle: DatabaseHandle
   let repository: PrincipalRepository
@@ -264,5 +273,64 @@ describe('PrincipalRepository', () => {
     expect(
       await repository.findActiveGuestByTokenHash(revoked.tokenHash, now),
     ).toBeNull()
+  })
+
+  test('purges only guests whose session has already expired', async () => {
+    const now = new Date()
+    const expired = guestInput(new Date(now.getTime() - GUEST_LIFETIME_MS * 2))
+    const expiredGuest = await repository.createGuest(expired)
+    const liveGuest = await repository.createGuest(guestInput(now))
+
+    const result = await repository.purgeExpiredGuests({ now, limit: 10 })
+
+    expect(result.deletedPrincipals).toBe(1)
+    const remaining = await handle.db
+      .select({ id: schema.principals.id })
+      .from(schema.principals)
+    expect(remaining.map((row) => row.id)).toEqual([liveGuest.principalId])
+    expect(remaining.map((row) => row.id)).not.toContain(
+      expiredGuest.principalId,
+    )
+  })
+
+  test('never purges a guest whose expiry is extended concurrently', async () => {
+    const now = new Date()
+    const expired = guestInput(new Date(now.getTime() - GUEST_LIFETIME_MS * 2))
+    const guest = await repository.createGuest(expired)
+
+    // 延長トランザクションを開いたまま掃除を走らせ、
+    // 「選定は期限切れ、削除の直前に延長」という競合状態を再現する。
+    const locked = createGate()
+    const release = createGate()
+
+    const extension = handle.db.transaction(async (tx) => {
+      await tx
+        .update(schema.guestSessions)
+        .set({
+          lastSeenAt: now,
+          expiresAt: new Date(now.getTime() + GUEST_LIFETIME_MS),
+          updatedAt: now,
+        })
+        .where(eq(schema.guestSessions.id, guest.id))
+      locked.open()
+      await release.wait
+    })
+
+    await locked.wait
+    const result = await repository.purgeExpiredGuests({ now, limit: 10 })
+    release.open()
+    await extension
+
+    // 更新中の行は SKIP LOCKED で見送られ、利用中のゲストは残る。
+    expect(result.deletedPrincipals).toBe(0)
+    const survivor = await repository.findActiveGuestByTokenHash(
+      expired.tokenHash,
+      now,
+    )
+    expect(survivor?.principalId).toBe(guest.principalId)
+
+    // 延長が確定したあとの掃除でも対象外のまま。
+    const afterCommit = await repository.purgeExpiredGuests({ now, limit: 10 })
+    expect(afterCommit.deletedPrincipals).toBe(0)
   })
 })
