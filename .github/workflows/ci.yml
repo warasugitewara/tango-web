@@ -17,6 +17,32 @@ jobs:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
+    services:
+      # 統合テスト専用のPostgreSQL。infra/test/compose.yml と同じイメージ・同じ設定に揃える。
+      postgres:
+        image: postgres:18.4-bookworm
+        env:
+          POSTGRES_DB: tango_test
+          POSTGRES_USER: tango_test
+          # CIのランナー内でのみ到達できるテスト専用の固定値。本番のシークレット経路とは無関係。
+          POSTGRES_PASSWORD: tango_test
+          TZ: Asia/Tokyo
+          PGTZ: Asia/Tokyo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tango_test -d tango_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 10s
+
+    env:
+      # マイグレーション適用先とテスト接続先。空のDBから作り直される。
+      DATABASE_URL: postgres://tango_test:tango_test@127.0.0.1:5432/tango_test
+      TEST_DATABASE_URL: postgres://tango_test:tango_test@127.0.0.1:5432/tango_test
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -28,6 +54,26 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # サービスのヘルスチェック通過後に念のため疎通を確認する。
+      # ランナー側の追加ツールに依存しないようbash組み込みのTCP接続で判定する。
+      - name: Wait for PostgreSQL
+        shell: bash
+        run: |
+          for _ in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/5432) 2>/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'PostgreSQLへ接続できませんでした。' >&2
+          exit 1
+
+      - name: Apply migrations to an empty database
+        run: bun run db:migrate
+
+      - name: Auth integration tests
+        run: bunx vitest run apps/api/src/features/auth
 
       - name: Verify generated auth schema is up to date
         run: bun run db:auth-schema:check

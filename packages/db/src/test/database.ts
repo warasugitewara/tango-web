@@ -55,6 +55,27 @@ export async function createTestDatabase(): Promise<DatabaseHandle> {
 }
 
 /**
+ * 識別まわりのテーブルに入っている文字列を1本に連結して返す。
+ * 生のゲストトークンがどこにも保存されていないことを検証するために使う。
+ */
+export async function dumpIdentityText(db: Database): Promise<string> {
+  const rows = await db.execute<{ payload: string }>(sql`
+    select coalesce(string_agg(payload, ' '), '') as payload
+    from (
+      select id || ' ' || coalesce(user_id, '') as payload from principals
+      union all
+      select id || ' ' || token_hash from guest_sessions
+      union all
+      select id || ' ' || merge_key from identity_merges
+      union all
+      select id || ' ' || event_type || ' ' || metadata::text from audit_logs
+    ) as identity_rows
+  `)
+
+  return rows[0]?.payload ?? ''
+}
+
+/**
  * 識別まわりの全テーブルを空にする。テストごとの独立性を担保する。
  */
 export async function resetIdentityTables(db: Database): Promise<void> {
