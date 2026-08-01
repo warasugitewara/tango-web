@@ -99,8 +99,12 @@ export function requestContext(
       context.set('actor', resolution.actor)
       context.set('guestExpiresAt', resolution.expiresAt)
     } catch (error) {
-      // 失効・取り消し済みのCookieはブラウザから取り除く。
-      clearGuestCookie(context, cookieSecure)
+      // 失効・取り消しが確定したときだけCookieを取り除く。
+      // DB障害のような一時的な失敗で消すと、唯一の生トークンを失って
+      // ゲストの学習データへ二度と到達できなくなる。
+      if (error instanceof AppError && error.code === 'UNAUTHENTICATED') {
+        clearGuestCookie(context, cookieSecure)
+      }
       throw error
     }
 

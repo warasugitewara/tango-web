@@ -315,6 +315,50 @@ describe('request context and error handling', () => {
     )
   })
 
+  test('keeps the guest cookie when resolution fails for an unknown reason', async () => {
+    // DB障害などの一時的な失敗でCookieを消してしまうと、
+    // 唯一の生トークンを失いゲストの学習データへ到達できなくなる。
+    const unstable: GuestService = {
+      async start() {
+        throw new Error('このテストでは使用しない。')
+      },
+      async resolve() {
+        throw new Error('データベースへ接続できません')
+      },
+      async revoke() {
+        // 何もしない
+      },
+    }
+
+    const app = createApp({
+      clock: { now: () => NOW },
+      guestService: unstable,
+      actorResolver: {
+        async resolveFormal() {
+          return null
+        },
+      },
+      identityCompletionService: {
+        async complete() {
+          throw new Error('このテストでは使用しない。')
+        },
+      },
+      authHandler: async () => new Response(null, { status: 204 }),
+      cookieSecure: true,
+    })
+
+    const response = await app.request('/api/session', {
+      headers: { cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}` },
+    })
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toMatchObject({
+      error: { code: 'INTERNAL_ERROR' },
+    })
+    // Cookieは残したままにする。
+    expect(response.headers.get('set-cookie')).toBeNull()
+  })
+
   test('maps an unexpected failure to INTERNAL_ERROR without leaking details', async () => {
     const failing: GuestService = {
       async start() {
