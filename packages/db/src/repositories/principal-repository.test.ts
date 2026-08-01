@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { eq } from 'drizzle-orm'
 import { v7 as uuidv7 } from 'uuid'
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import type { DatabaseHandle } from '../client'
@@ -96,6 +97,56 @@ describe('PrincipalRepository', () => {
     expect(result.principal.userId).toBe(userId)
 
     // 昇格後のゲストセッションは失効し、再利用できない。
+    expect(
+      await repository.findActiveGuestByTokenHash(input.tokenHash, now),
+    ).toBeNull()
+  })
+
+  test('promotes a shared guest token for only one user under concurrent completion', async () => {
+    const now = new Date()
+    const input = guestInput(now)
+    const guest = await repository.createGuest(input)
+    const firstUserId = await insertFormalUser(now)
+    const secondUserId = await insertFormalUser(now)
+
+    // 同じゲストCookieを2人のユーザーが同時に持ち込んだ状況を作る。
+    const results = await Promise.all(
+      [firstUserId, secondUserId].map((userId) =>
+        repository.completeIdentity({
+          userId,
+          guestTokenHash: input.tokenHash,
+          mergeKey: uuidv7(),
+          now,
+        }),
+      ),
+    )
+
+    // ゲストprincipalを取り込めるのは片方だけ。もう片方は自分専用に新規作成する。
+    const promoted = results.find((result) => result.outcome === 'promoted')
+    const created = results.find((result) => result.outcome === 'created')
+
+    expect(promoted).toBeDefined()
+    expect(created).toBeDefined()
+    expect(promoted?.principal.id).toBe(guest.principalId)
+    expect(created?.principal.id).not.toBe(guest.principalId)
+
+    // 昇格したprincipalのuser_idが後勝ちで上書きされていない。
+    const [guestPrincipal] = await handle.db
+      .select()
+      .from(schema.principals)
+      .where(eq(schema.principals.id, guest.principalId))
+
+    expect(guestPrincipal?.kind).toBe('user')
+    expect(guestPrincipal?.userId).toBe(promoted?.principal.userId)
+
+    // 2人が同じprincipalを共有しない。
+    const first = await repository.findByUserId(firstUserId)
+    const second = await repository.findByUserId(secondUserId)
+    expect(first).not.toBeNull()
+    expect(second).not.toBeNull()
+    expect(first?.id).not.toBe(second?.id)
+
+    // 取り込みに使われたゲストセッションは失効している。
     expect(
       await repository.findActiveGuestByTokenHash(input.tokenHash, now),
     ).toBeNull()

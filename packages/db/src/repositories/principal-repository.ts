@@ -146,6 +146,113 @@ function toGuestSessionRecord(row: GuestSessionRow): GuestSessionRecord {
   }
 }
 
+/**
+ * principal行をIDで排他ロックする。
+ * READ COMMITTEDではロック取得時に最新版へ再評価されるため、
+ * 取得後の値をそのまま呼び出し側の再確認に使える。
+ */
+async function lockPrincipalById(
+  tx: DatabaseTransaction,
+  principalId: string,
+): Promise<PrincipalRow | undefined> {
+  const [row] = await tx
+    .select()
+    .from(principals)
+    .where(eq(principals.id, principalId))
+    .limit(1)
+    .for('update')
+
+  return row
+}
+
+/** ゲストセッション行をIDで排他ロックする。有効性の判定はロック後に行う。 */
+async function lockGuestSessionById(
+  tx: DatabaseTransaction,
+  sessionId: string,
+): Promise<GuestSessionRow | undefined> {
+  const [row] = await tx
+    .select()
+    .from(guestSessions)
+    .where(eq(guestSessions.id, sessionId))
+    .limit(1)
+    .for('update')
+
+  return row
+}
+
+/**
+ * 取り込み対象として確定したゲスト。
+ * セッションとprincipalの双方をロック済みで、有効性の再確認も済んでいる。
+ */
+type LockedGuest = {
+  session: GuestSessionRow
+  principal: PrincipalRow
+}
+
+/**
+ * ゲストセッションとそのprincipalをこの順序でロックし、有効性を再確認する。
+ * 並行して取り消し・期限切れ・昇格済みになっていた場合は null を返し、
+ * 取り込み対象から外す。
+ */
+async function lockActiveGuest(
+  tx: DatabaseTransaction,
+  tokenHash: string,
+  now: Date,
+): Promise<LockedGuest | null> {
+  const [candidate] = await tx
+    .select({ id: guestSessions.id })
+    .from(guestSessions)
+    .where(eq(guestSessions.tokenHash, tokenHash))
+    .limit(1)
+
+  if (candidate === undefined) {
+    return null
+  }
+
+  const session = await lockGuestSessionById(tx, candidate.id)
+
+  if (
+    session === undefined ||
+    session.revokedAt !== null ||
+    session.expiresAt.getTime() <= now.getTime()
+  ) {
+    return null
+  }
+
+  const principal = await lockPrincipalById(tx, session.principalId)
+
+  // 昇格済み・別ユーザーに割り当て済みのprincipalは取り込まない。
+  if (
+    principal === undefined ||
+    principal.kind !== 'guest' ||
+    principal.userId !== null
+  ) {
+    return null
+  }
+
+  return { session, principal }
+}
+
+/** 正式principalをロックし、対象ユーザーのものであることを再確認する。 */
+async function lockFormalPrincipal(
+  tx: DatabaseTransaction,
+  userId: string,
+): Promise<PrincipalRow | undefined> {
+  const [candidate] = await tx
+    .select({ id: principals.id })
+    .from(principals)
+    .where(eq(principals.userId, userId))
+    .limit(1)
+
+  if (candidate === undefined) {
+    return undefined
+  }
+
+  const locked = await lockPrincipalById(tx, candidate.id)
+
+  return locked !== undefined && locked.userId === userId ? locked : undefined
+}
+
 async function findPrincipalById(
   tx: DatabaseTransaction,
   principalId: string,
@@ -270,36 +377,26 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
             }
           }
 
-          // 2. 既存の正式principalと、有効なゲストセッションを取得する。
-          const [formalRow] = await tx
-            .select()
-            .from(principals)
-            .where(eq(principals.userId, userId))
-            .limit(1)
-
-          const [guestRow] =
+          // 2. 対象行を決まった順序でロックする。
+          //    ゲストセッション → ゲストprincipal → 正式principal に固定し、
+          //    逆順のロック要求が生じないようにしてデッドロックを避ける。
+          //    ロック取得後に有効性・kind・userIdを再確認するので、
+          //    同じトークンを別ユーザーが並行して使っても取り込みは一度きりになる。
+          const guest =
             guestTokenHash === null
-              ? []
-              : await tx
-                  .select()
-                  .from(guestSessions)
-                  .where(
-                    and(
-                      eq(guestSessions.tokenHash, guestTokenHash),
-                      isNull(guestSessions.revokedAt),
-                      gt(guestSessions.expiresAt, now),
-                    ),
-                  )
-                  .limit(1)
+              ? null
+              : await lockActiveGuest(tx, guestTokenHash, now)
+
+          const formalRow = await lockFormalPrincipal(tx, userId)
 
           const revokeGuestSession = async (): Promise<void> => {
-            if (guestRow === undefined) {
+            if (guest === null) {
               return
             }
             await tx
               .update(guestSessions)
               .set({ revokedAt: now, updatedAt: now })
-              .where(eq(guestSessions.id, guestRow.id))
+              .where(eq(guestSessions.id, guest.session.id))
           }
 
           const recordMerge = async (
@@ -319,13 +416,10 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
 
           // 3a. 正式principalが既にある。
           if (formalRow !== undefined) {
-            const isSeparateGuest =
-              guestRow !== undefined && guestRow.principalId !== formalRow.id
-
-            if (isSeparateGuest) {
-              await moveOwnedDomainRows(guestRow.principalId, formalRow.id, tx)
+            if (guest !== null && guest.principal.id !== formalRow.id) {
+              await moveOwnedDomainRows(guest.principal.id, formalRow.id, tx)
               await revokeGuestSession()
-              await recordMerge(formalRow.id, guestRow.principalId)
+              await recordMerge(formalRow.id, guest.principal.id)
               return {
                 principal: toPrincipalRecord(formalRow),
                 outcome: 'merged',
@@ -341,11 +435,20 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
           }
 
           // 3b. 有効なゲストがいるなら、その行をそのまま正式principalへ昇格する。
-          if (guestRow !== undefined) {
+          if (guest !== null) {
             const [promoted] = await tx
               .update(principals)
               .set({ kind: 'user', userId, updatedAt: now })
-              .where(eq(principals.id, guestRow.principalId))
+              // ロック済みでも条件を明示し、ゲストのままの行だけを昇格する。
+              // 万一先に別ユーザーへ割り当てられていたらUPDATEは0件になり、
+              // 例外でトランザクション全体を巻き戻して上書きを防ぐ。
+              .where(
+                and(
+                  eq(principals.id, guest.principal.id),
+                  eq(principals.kind, 'guest'),
+                  isNull(principals.userId),
+                ),
+              )
               .returning()
 
             if (promoted === undefined) {
