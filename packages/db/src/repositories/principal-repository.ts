@@ -59,11 +59,12 @@ export interface PrincipalRepository {
     mergeKey: string
     now: Date
   }): Promise<IdentityCompletionResult>
+  /** 期限を延長できたときだけ true。取り消し済み・不在の場合は false。 */
   touchGuest(input: {
     sessionId: string
     now: Date
     expiresAt: Date
-  }): Promise<void>
+  }): Promise<boolean>
   revokeGuest(sessionId: string, now: Date): Promise<void>
   purgeExpiredGuests(input: {
     now: Date
@@ -383,12 +384,15 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
     },
 
     async touchGuest({ sessionId, now, expiresAt }) {
-      await db
+      const updated = await db
         .update(guestSessions)
         .set({ lastSeenAt: now, expiresAt, updatedAt: now })
         .where(
           and(eq(guestSessions.id, sessionId), isNull(guestSessions.revokedAt)),
         )
+        .returning({ id: guestSessions.id })
+
+      return updated.length > 0
     },
 
     async revokeGuest(sessionId, now) {

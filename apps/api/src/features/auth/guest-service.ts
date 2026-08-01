@@ -47,6 +47,11 @@ export type GuestStartResult = {
 export type GuestResolution = {
   actor: GuestActor
   expiresAt: Temporal.Instant
+  /**
+   * このリクエストで期限を実際に延長したかどうか。
+   * true のときは呼び出し側がブラウザのCookieにも同じ延長を反映する。
+   */
+  refreshed: boolean
 }
 
 export interface GuestService {
@@ -154,15 +159,22 @@ export function createGuestService(
       }
 
       let expiresAt = toInstant(session.expiresAt)
+      let refreshed = false
 
       // 学習日 (04:00 JST 起点) ごとに一度だけ延長する。書き込み回数を抑える。
       if (learningDayOf(toInstant(session.lastSeenAt)) !== learningDayOf(now)) {
-        expiresAt = expiryFrom(now)
-        await repository.touchGuest({
+        const extended = expiryFrom(now)
+        // 延長が実際に成立した場合だけ新しい期限を採用する。
+        // 並行して取り消されていた場合は既存の期限のままにする。
+        refreshed = await repository.touchGuest({
           sessionId: session.id,
           now: toDate(now),
-          expiresAt: toDate(expiresAt),
+          expiresAt: toDate(extended),
         })
+
+        if (refreshed) {
+          expiresAt = extended
+        }
       }
 
       return {
@@ -172,6 +184,7 @@ export function createGuestService(
           guestSessionId: session.id,
         },
         expiresAt,
+        refreshed,
       }
     },
 

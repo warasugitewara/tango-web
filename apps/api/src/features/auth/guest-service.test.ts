@@ -69,11 +69,16 @@ function createFakeRepository(): FakeRepository {
     async touchGuest({ sessionId, now, expiresAt }) {
       writes += 1
       touches += 1
-      const session = sessions.find((candidate) => candidate.id === sessionId)
-      if (session !== undefined) {
-        session.lastSeenAt = now
-        session.expiresAt = expiresAt
+      const session = sessions.find(
+        (candidate) =>
+          candidate.id === sessionId && candidate.revokedAt === null,
+      )
+      if (session === undefined) {
+        return false
       }
+      session.lastSeenAt = now
+      session.expiresAt = expiresAt
+      return true
     },
     async revokeGuest(sessionId, now) {
       writes += 1
@@ -244,5 +249,52 @@ describe('GuestService', () => {
     expect(session?.expiresAt.getTime()).toBe(
       extendedFrom.add({ hours: 24 * GUEST_SESSION_DAYS }).epochMilliseconds,
     )
+  })
+
+  test('reports whether the expiry was actually extended', async () => {
+    const started = await service.start({
+      turnstileToken: 'valid-token',
+      remoteIp: null,
+    })
+
+    // 同じ学習日のうちは延長しないので再発行も不要。
+    const sameDay = await service.resolve(started.rawToken)
+    expect(sameDay.refreshed).toBe(false)
+    expect(sameDay.expiresAt.toString()).toBe(started.expiresAt.toString())
+
+    // 学習日を跨ぐと延長が成立し、呼び出し側へ再発行を促す。
+    currentInstant = parseJstInstant('2026-08-02T04:00:00+09:00')
+    const nextDay = await service.resolve(started.rawToken)
+    expect(nextDay.refreshed).toBe(true)
+    expect(nextDay.expiresAt.toString()).toBe(
+      currentInstant.add({ hours: 24 * GUEST_SESSION_DAYS }).toString(),
+    )
+  })
+
+  test('keeps the stored expiry when the extension does not apply', async () => {
+    // セッションの取得後、延長の直前に取り消された状況を再現する。
+    const racing = createGuestService({
+      repository: {
+        ...fake.repository,
+        async touchGuest() {
+          return false
+        },
+      },
+      clock: { now: () => currentInstant },
+      turnstile: { verify: async () => true },
+      tokenCodec: codec,
+    })
+
+    const started = await racing.start({
+      turnstileToken: 'valid-token',
+      remoteIp: null,
+    })
+
+    currentInstant = parseJstInstant('2026-08-02T04:00:00+09:00')
+    const resolution = await racing.resolve(started.rawToken)
+
+    // 延長が成立していないので再発行させない。返す期限も元のままにする。
+    expect(resolution.refreshed).toBe(false)
+    expect(resolution.expiresAt.toString()).toBe(started.expiresAt.toString())
   })
 })

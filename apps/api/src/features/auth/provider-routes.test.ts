@@ -68,6 +68,7 @@ function createHarness(
           guestSessionId: 'session-1',
         },
         expiresAt: NOW.add({ hours: 24 }),
+        refreshed: false,
       }
     },
     async revoke() {

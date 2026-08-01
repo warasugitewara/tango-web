@@ -1,9 +1,13 @@
 import { zValidator } from '@hono/zod-validator'
 import { AppError } from '@tango/shared'
 import { Hono } from 'hono'
-import { getCookie, setCookie } from 'hono/cookie'
+import { getCookie } from 'hono/cookie'
 import { z } from 'zod'
-import { type AppEnv, clearGuestCookie } from '../../middleware/request-context'
+import {
+  type AppEnv,
+  clearGuestCookie,
+  setGuestCookie,
+} from '../../middleware/request-context'
 import {
   type SessionView,
   toGuestSessionView,
@@ -12,7 +16,6 @@ import {
 import {
   GUEST_COOKIE_NAME,
   GUEST_RISK_NOTICE,
-  GUEST_SESSION_MAX_AGE_SECONDS,
   type GuestService,
 } from './guest-service'
 import type { IdentityCompletionService } from './identity-completion-service'
@@ -60,13 +63,7 @@ export function createAuthRoutes(options: AuthRoutesOptions) {
           remoteIp: context.req.header('cf-connecting-ip') ?? null,
         })
 
-        setCookie(context, GUEST_COOKIE_NAME, started.rawToken, {
-          path: '/',
-          httpOnly: true,
-          secure: cookieSecure,
-          sameSite: 'Lax',
-          maxAge: GUEST_SESSION_MAX_AGE_SECONDS,
-        })
+        setGuestCookie(context, started.rawToken, cookieSecure)
 
         return context.json(
           toGuestSessionView(started.expiresAt, started.warning),

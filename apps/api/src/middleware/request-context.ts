@@ -1,7 +1,7 @@
 import type { Temporal } from '@js-temporal/polyfill'
 import { type Actor, AppError, type ServiceContext } from '@tango/shared'
 import type { Context, MiddlewareHandler } from 'hono'
-import { deleteCookie, getCookie } from 'hono/cookie'
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { v7 as uuidv7 } from 'uuid'
 import type {
   ActorResolver,
@@ -10,6 +10,7 @@ import type {
 import {
   type Clock,
   GUEST_COOKIE_NAME,
+  GUEST_SESSION_MAX_AGE_SECONDS,
   type GuestService,
 } from '../features/auth/guest-service'
 
@@ -48,6 +49,25 @@ export function requestId(): MiddlewareHandler<AppEnv> {
     context.header(REQUEST_ID_HEADER, resolved)
     await next()
   }
+}
+
+/**
+ * ゲストCookieを発行する。発行元が1か所になるよう属性はここだけで定義する。
+ * DB側の期限を延長したときは同じ生トークンで再発行し、
+ * ブラウザ側のMax-Ageだけが先に尽きないようにする。
+ */
+export function setGuestCookie(
+  context: Context<AppEnv>,
+  rawToken: string,
+  cookieSecure: boolean,
+): void {
+  setCookie(context, GUEST_COOKIE_NAME, rawToken, {
+    path: '/',
+    httpOnly: true,
+    secure: cookieSecure,
+    sameSite: 'Lax',
+    maxAge: GUEST_SESSION_MAX_AGE_SECONDS,
+  })
 }
 
 /** ゲストCookieを確実に消す。属性は発行時と揃える。 */
@@ -98,6 +118,12 @@ export function requestContext(
       const resolution = await guestService.resolve(rawToken)
       context.set('actor', resolution.actor)
       context.set('guestExpiresAt', resolution.expiresAt)
+
+      // DB側の期限を延長できたときはCookieのMax-Ageも同じだけ延ばす。
+      // これがないと毎日利用していても作成から90日でブラウザがCookieを捨てる。
+      if (resolution.refreshed) {
+        setGuestCookie(context, rawToken, cookieSecure)
+      }
     } catch (error) {
       // 失効・取り消しが確定したときだけCookieを取り除く。
       // DB障害のような一時的な失敗で消すと、唯一の生トークンを失って

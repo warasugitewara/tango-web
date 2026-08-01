@@ -24,6 +24,8 @@ import {
   createGuestService,
   createGuestTokenCodec,
   GUEST_COOKIE_NAME,
+  GUEST_SESSION_DAYS,
+  GUEST_SESSION_MAX_AGE_SECONDS,
 } from './guest-service'
 import { createIdentityCompletionService } from './identity-completion-service'
 
@@ -227,6 +229,49 @@ describe('identity flow', () => {
     // principalは既存の正式principalのまま変わらない。
     const after = await repository.findByUserId('user-flow-merge')
     expect(after?.id).toBe(formal?.id)
+  })
+
+  test('keeps a daily guest reachable past the 90 day cookie lifetime', async () => {
+    const { response: started, rawToken } = await startGuest()
+    expect(started.headers.get('set-cookie')).toContain(
+      `Max-Age=${GUEST_SESSION_MAX_AGE_SECONDS}`,
+    )
+
+    const createdAt = currentInstant
+
+    // 80日後に再訪する。DB側の期限もCookieのMax-Ageも延長されるはず。
+    currentInstant = createdAt.add({ hours: 24 * 80 })
+    const revisit = await app.request('/api/session', {
+      headers: { cookie: `${GUEST_COOKIE_NAME}=${rawToken}` },
+    })
+
+    expect(revisit.status).toBe(200)
+    expect(revisit.headers.get('set-cookie')).toContain(
+      `${GUEST_COOKIE_NAME}=${rawToken}`,
+    )
+    expect(revisit.headers.get('set-cookie')).toContain(
+      `Max-Age=${GUEST_SESSION_MAX_AGE_SECONDS}`,
+    )
+
+    const extended = await repository.findActiveGuestByTokenHash(
+      codec.hash(rawToken),
+      new Date(currentInstant.epochMilliseconds),
+    )
+    expect(extended?.expiresAt.getTime()).toBe(
+      currentInstant.add({ hours: 24 * GUEST_SESSION_DAYS }).epochMilliseconds,
+    )
+
+    // 作成から90日を超えても、延長が続いている限り到達できる。
+    currentInstant = createdAt.add({ hours: 24 * 160 })
+    const later = await app.request('/api/session', {
+      headers: { cookie: `${GUEST_COOKIE_NAME}=${rawToken}` },
+    })
+
+    expect(later.status).toBe(200)
+    expect(await later.json()).toMatchObject({
+      authenticated: true,
+      kind: 'guest',
+    })
   })
 
   test('rejects identity completion without a Better Auth session', async () => {

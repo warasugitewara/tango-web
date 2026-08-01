@@ -29,6 +29,8 @@ function createHarness(options: {
   turnstileValid?: boolean
   formalSession?: FormalSession | null
   cookieSecure?: boolean
+  /** ゲスト解決時にDB側の期限を延長できたことにするか。 */
+  guestRefreshed?: boolean
 }): Harness {
   const turnstileValid = options.turnstileValid ?? true
   const formalSession = options.formalSession ?? null
@@ -64,6 +66,7 @@ function createHarness(options: {
           guestSessionId: 'session-1',
         },
         expiresAt: GUEST_EXPIRES_AT,
+        refreshed: options.guestRefreshed ?? false,
       }
     },
     async revoke() {
@@ -263,6 +266,34 @@ describe('GET /api/session', () => {
     const cookie = response.headers.get('set-cookie')
     expect(cookie).toContain(`${GUEST_COOKIE_NAME}=`)
     expect(cookie).toContain('Max-Age=0')
+  })
+
+  test('reissues the guest cookie when the expiry was extended', async () => {
+    // DB側だけ延長してCookieを据え置くと、作成から90日でブラウザが先にCookieを捨てる。
+    const { app } = createHarness({ guestRefreshed: true })
+    const response = await app.request('/api/session', {
+      headers: { cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}` },
+    })
+
+    expect(response.status).toBe(200)
+
+    const cookie = response.headers.get('set-cookie')
+    expect(cookie).toContain(`${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`)
+    expect(cookie).toContain(`Max-Age=${24 * 60 * 60 * GUEST_SESSION_DAYS}`)
+    expect(cookie).toContain('HttpOnly')
+    expect(cookie).toContain('Secure')
+    expect(cookie).toContain('SameSite=Lax')
+    expect(cookie).not.toContain('Domain')
+  })
+
+  test('leaves the guest cookie untouched when nothing was extended', async () => {
+    const { app } = createHarness({})
+    const response = await app.request('/api/session', {
+      headers: { cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}` },
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('set-cookie')).toBeNull()
   })
 
   test('prefers the formal session over a guest cookie', async () => {
