@@ -16,6 +16,7 @@ export {
   type IdentityCompletionResult,
   type PrincipalRecord,
   type PrincipalRepository,
+  type PurgeExpiredGuestsResult,
 } from './repositories/principal-repository'
 export * as schema from './schema'
 export type { IdentityMergeStatus, PrincipalKind } from './schema/principals'

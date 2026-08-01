@@ -1,9 +1,14 @@
+import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
 
 const environmentSchema = z.object({
   APP_ENV: z.enum(['development', 'test', 'production']),
   APP_ORIGIN: z.url(),
   DATABASE_URL: z.string().min(1),
+  /** ゲストトークンのHMACペッパーを格納したファイルのパス。値自体は環境変数に置かない。 */
+  GUEST_TOKEN_PEPPER_FILE: z.string().min(1),
+  /** Cloudflare Turnstileのシークレットを格納したファイルのパス。 */
+  TURNSTILE_SECRET_FILE: z.string().min(1),
 })
 
 export type Env = Readonly<z.infer<typeof environmentSchema>>
@@ -28,4 +33,26 @@ export function loadEnv(source: Record<string, string | undefined>): Env {
   }
 
   return Object.freeze(result.data)
+}
+
+/**
+ * シークレットをファイルから読み取る。
+ * 読み取りに失敗してもパスだけを報告し、内容は決してログへ出さない。
+ */
+export async function readSecretFile(path: string): Promise<string> {
+  let contents: string
+
+  try {
+    contents = await readFile(path, 'utf8')
+  } catch {
+    throw new Error(`シークレットファイルを読み取れませんでした: ${path}`)
+  }
+
+  const secret = contents.trim()
+
+  if (secret === '') {
+    throw new Error(`シークレットファイルが空です: ${path}`)
+  }
+
+  return secret
 }

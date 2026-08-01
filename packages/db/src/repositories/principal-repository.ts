@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from 'drizzle-orm'
+import { and, eq, gt, inArray, isNull, lte } from 'drizzle-orm'
 import { v7 as uuidv7 } from 'uuid'
 import type { Database, DatabaseTransaction } from '../client'
 import {
@@ -37,6 +37,11 @@ export type IdentityCompletionResult = {
   outcome: IdentityCompletionOutcome
 }
 
+export type PurgeExpiredGuestsResult = {
+  /** 実際に削除されたゲストprincipalの件数。 */
+  deletedPrincipals: number
+}
+
 export interface PrincipalRepository {
   findByUserId(userId: string): Promise<PrincipalRecord | null>
   findActiveGuestByTokenHash(
@@ -60,6 +65,10 @@ export interface PrincipalRepository {
     expiresAt: Date
   }): Promise<void>
   revokeGuest(sessionId: string, now: Date): Promise<void>
+  purgeExpiredGuests(input: {
+    now: Date
+    limit: number
+  }): Promise<PurgeExpiredGuestsResult>
 }
 
 /** PostgreSQLの一意制約違反。 */
@@ -371,6 +380,43 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
         .where(
           and(eq(guestSessions.id, sessionId), isNull(guestSessions.revokedAt)),
         )
+    },
+
+    async purgeExpiredGuests({ now, limit }) {
+      // 正式ユーザーが紐づいたprincipalは kind='user' かつ user_id が非NULLになるため、
+      // ここで選ばれることはない。所有データはFKのcascadeで一緒に消える。
+      const candidates = await db
+        .select({ id: principals.id })
+        .from(principals)
+        .innerJoin(guestSessions, eq(guestSessions.principalId, principals.id))
+        .where(
+          and(
+            eq(principals.kind, 'guest'),
+            isNull(principals.userId),
+            lte(guestSessions.expiresAt, now),
+          ),
+        )
+        .limit(limit)
+
+      if (candidates.length === 0) {
+        return { deletedPrincipals: 0 }
+      }
+
+      const deleted = await db
+        .delete(principals)
+        .where(
+          and(
+            inArray(
+              principals.id,
+              candidates.map((row) => row.id),
+            ),
+            eq(principals.kind, 'guest'),
+            isNull(principals.userId),
+          ),
+        )
+        .returning({ id: principals.id })
+
+      return { deletedPrincipals: deleted.length }
     },
   }
 }
