@@ -162,7 +162,7 @@ describe('PrincipalRepository', () => {
       now,
     })
     const input = guestInput(now)
-    await repository.createGuest(input)
+    const guest = await repository.createGuest(input)
 
     const merged = await repository.completeIdentity({
       userId,
@@ -177,6 +177,37 @@ describe('PrincipalRepository', () => {
     expect(
       await repository.findActiveGuestByTokenHash(input.tokenHash, now),
     ).toBeNull()
+
+    // 取り込み元のゲストprincipalは残さない。
+    const remaining = await handle.db
+      .select({ id: schema.principals.id })
+      .from(schema.principals)
+    expect(remaining.map((row) => row.id)).toEqual([created.principal.id])
+
+    // 従属する行もcascadeで消える。
+    const orphanSessions = await handle.db
+      .select({ id: schema.guestSessions.id })
+      .from(schema.guestSessions)
+      .where(eq(schema.guestSessions.principalId, guest.principalId))
+    expect(orphanSessions).toHaveLength(0)
+
+    const orphanSettings = await handle.db
+      .select({ principalId: schema.userSettings.principalId })
+      .from(schema.userSettings)
+      .where(eq(schema.userSettings.principalId, guest.principalId))
+    expect(orphanSettings).toHaveLength(0)
+
+    // 統合の事実そのものは identity_merges に残る。
+    const merges = await handle.db
+      .select({
+        sourcePrincipalId: schema.identityMerges.sourcePrincipalId,
+        targetPrincipalId: schema.identityMerges.targetPrincipalId,
+      })
+      .from(schema.identityMerges)
+      .where(eq(schema.identityMerges.targetPrincipalId, created.principal.id))
+    expect(merges).toHaveLength(2)
+    // 取り込み元を削除するため source_principal_id は ON DELETE SET NULL でNULLになる。
+    expect(merges.every((row) => row.sourcePrincipalId === null)).toBe(true)
   })
 
   test('returns the existing principal when completion is retried', async () => {

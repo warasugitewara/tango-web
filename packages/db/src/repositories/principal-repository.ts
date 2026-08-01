@@ -283,6 +283,9 @@ async function ensureUserSettings(
  * Phase 1ではデッキやカードのテーブルがまだ無いため移送対象は存在せず、
  * 統合の事実は同トランザクションの `identity_merges` 行が記録する。
  * Phase 2でテーブルを追加する際は、この関数の中だけを拡張すれば原子性が保たれる。
+ * 呼び出し側はこの関数の完了後に取り込み元principalを削除するため、
+ * ここで移送し忘れた行はcascadeで失われる。所有列を持つテーブルを足したら
+ * 必ずここへ移送処理を追加すること。
  */
 export async function moveOwnedDomainRows(
   sourcePrincipalId: string,
@@ -389,16 +392,6 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
 
           const formalRow = await lockFormalPrincipal(tx, userId)
 
-          const revokeGuestSession = async (): Promise<void> => {
-            if (guest === null) {
-              return
-            }
-            await tx
-              .update(guestSessions)
-              .set({ revokedAt: now, updatedAt: now })
-              .where(eq(guestSessions.id, guest.session.id))
-          }
-
           const recordMerge = async (
             targetPrincipalId: string,
             sourcePrincipalId: string | null,
@@ -415,18 +408,36 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
           }
 
           // 3a. 正式principalが既にある。
+          // ロック時に kind='guest' かつ user_id IS NULL を確認しているため、
+          // 有効なゲストがいる場合は必ず正式principalとは別の行になる。
           if (formalRow !== undefined) {
-            if (guest !== null && guest.principal.id !== formalRow.id) {
+            if (guest !== null) {
               await moveOwnedDomainRows(guest.principal.id, formalRow.id, tx)
-              await revokeGuestSession()
               await recordMerge(formalRow.id, guest.principal.id)
+
+              // 移送が終わってから取り込み元のゲストprincipalを同じ
+              // トランザクションで削除する。残すと、解決済みactorを握った
+              // 並行リクエストが旧principal配下へ書き込み続けられ、
+              // 二度と参照されないデータが積み上がる。
+              // guest_sessions と user_settings はFKのcascadeで一緒に消え、
+              // identity_merges.source_principal_id は ON DELETE SET NULL に
+              // よってNULLになる。
+              await tx
+                .delete(principals)
+                .where(
+                  and(
+                    eq(principals.id, guest.principal.id),
+                    eq(principals.kind, 'guest'),
+                    isNull(principals.userId),
+                  ),
+                )
+
               return {
                 principal: toPrincipalRecord(formalRow),
                 outcome: 'merged',
               }
             }
 
-            await revokeGuestSession()
             await recordMerge(formalRow.id, null)
             return {
               principal: toPrincipalRecord(formalRow),
@@ -455,7 +466,12 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
               throw new Error('ゲストprincipalの昇格に失敗しました。')
             }
 
-            await revokeGuestSession()
+            // 昇格した行はそのまま残るので、ゲストセッションだけ失効させる。
+            await tx
+              .update(guestSessions)
+              .set({ revokedAt: now, updatedAt: now })
+              .where(eq(guestSessions.id, guest.session.id))
+
             await recordMerge(promoted.id, null)
             return {
               principal: toPrincipalRecord(promoted),

@@ -229,6 +229,12 @@ describe('identity flow', () => {
     // principalは既存の正式principalのまま変わらない。
     const after = await repository.findByUserId('user-flow-merge')
     expect(after?.id).toBe(formal?.id)
+
+    // 取り込み元のゲストprincipalは残らない。
+    const remaining = await handle.db
+      .select({ id: schema.principals.id })
+      .from(schema.principals)
+    expect(remaining.map((row) => row.id)).toEqual([formal?.id])
   })
 
   test('never replaces the session of an existing guest', async () => {
