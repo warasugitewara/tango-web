@@ -1,0 +1,65 @@
+/**
+ * 統合テスト用のデータベースヘルパ。
+ * `infra/test/compose.yml` が起動するテスト専用インスタンスだけを対象にする。
+ * 本番の接続情報・シークレット経路とは一切共有しない。
+ */
+
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { sql } from 'drizzle-orm'
+import { migrate } from 'drizzle-orm/postgres-js/migrator'
+import { createDatabase, type Database, type DatabaseHandle } from '../client'
+
+/** テスト専用インスタンスの既定接続先。認証情報はテスト用の固定値。 */
+const DEFAULT_TEST_DATABASE_URL =
+  'postgres://tango_test:tango_test@127.0.0.1:55432/tango_test'
+
+export const TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL ?? DEFAULT_TEST_DATABASE_URL
+
+// Bun (bun run) とVitest (Node) の双方で解決できる形で参照する。
+const MIGRATIONS_FOLDER = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  'migrations',
+)
+
+/** TRUNCATE対象。外部キー順序に依存しないようCASCADEを使う。 */
+const RESETTABLE_TABLES = [
+  'audit_logs',
+  'identity_merges',
+  'user_settings',
+  'guest_sessions',
+  'principals',
+  'account',
+  'session',
+  'verification',
+  'user',
+] as const
+
+let migrationPromise: Promise<void> | null = null
+
+/**
+ * テストDBへ接続し、プロセス内で一度だけマイグレーションを適用する。
+ */
+export async function createTestDatabase(): Promise<DatabaseHandle> {
+  const handle = createDatabase(TEST_DATABASE_URL, { max: 5 })
+
+  migrationPromise ??= migrate(handle.db, {
+    migrationsFolder: MIGRATIONS_FOLDER,
+  })
+  await migrationPromise
+
+  return handle
+}
+
+/**
+ * 識別まわりの全テーブルを空にする。テストごとの独立性を担保する。
+ */
+export async function resetIdentityTables(db: Database): Promise<void> {
+  const targets = RESETTABLE_TABLES.map((table) => `"${table}"`).join(', ')
+  await db.execute(
+    sql.raw(`truncate table ${targets} restart identity cascade`),
+  )
+}

@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Verify generated auth schema is up to date
+        run: bun run db:auth-schema:check
+
       - name: Check
         run: bun run check
 
