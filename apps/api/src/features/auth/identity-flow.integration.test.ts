@@ -231,6 +231,40 @@ describe('identity flow', () => {
     expect(after?.id).toBe(formal?.id)
   })
 
+  test('never replaces the session of an existing guest', async () => {
+    const { rawToken } = await startGuest()
+    const before = await repository.findActiveGuestByTokenHash(
+      codec.hash(rawToken),
+      new Date(currentInstant.epochMilliseconds),
+    )
+    expect(before).not.toBeNull()
+
+    // 同じブラウザから再度開始しても、既存のゲストをそのまま返す。
+    const again = await app.request('/api/guest/start', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: `${GUEST_COOKIE_NAME}=${rawToken}`,
+      },
+      body: JSON.stringify({ turnstileToken: 'valid-token' }),
+    })
+
+    expect(again.status).toBe(200)
+    expect(again.headers.get('set-cookie')).toBeNull()
+
+    const after = await repository.findActiveGuestByTokenHash(
+      codec.hash(rawToken),
+      new Date(currentInstant.epochMilliseconds),
+    )
+    expect(after?.principalId).toBe(before?.principalId)
+
+    // 到達不能な孤児principalを作らない。
+    const allPrincipals = await handle.db
+      .select({ id: schema.principals.id })
+      .from(schema.principals)
+    expect(allPrincipals).toHaveLength(1)
+  })
+
   test('keeps a daily guest reachable past the 90 day cookie lifetime', async () => {
     const { response: started, rawToken } = await startGuest()
     expect(started.headers.get('set-cookie')).toContain(

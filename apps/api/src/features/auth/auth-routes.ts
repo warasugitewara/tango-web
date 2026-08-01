@@ -57,6 +57,21 @@ export function createAuthRoutes(options: AuthRoutesOptions) {
           })
         }
 
+        // 既に有効なゲストがいる場合は新しいトークンを発行しない。
+        // Cookieを上書きすると旧principalの学習データへ到達する唯一の手段を失う。
+        const actor = context.get('actor')
+        const currentExpiresAt = context.get('guestExpiresAt')
+
+        if (
+          actor !== null &&
+          actor.kind === 'guest' &&
+          currentExpiresAt !== null
+        ) {
+          return context.json(
+            toGuestSessionView(currentExpiresAt, GUEST_RISK_NOTICE),
+          )
+        }
+
         const { turnstileToken } = context.req.valid('json')
         const started = await guestService.start({
           turnstileToken,
