@@ -163,13 +163,20 @@ describe('identity flow', () => {
     const completed = await completeIdentity(rawToken, mergeKey)
 
     expect(completed.status).toBe(200)
-    expect(await completed.json()).toEqual({ outcome: 'promoted' })
+    expect(await completed.json()).toEqual({
+      actor: {
+        kind: 'user',
+        principalId: guestRecord?.principalId,
+        userId: 'user-flow-promote',
+      },
+      outcome: 'promoted',
+    })
     expect(completed.headers.get('set-cookie')).toContain('Max-Age=0')
 
     // 同じmergeKeyの再送は同じ結果に収束する。
     const replayed = await completeIdentity(null, mergeKey)
     expect(replayed.status).toBe(200)
-    expect(await replayed.json()).toEqual({ outcome: 'existing' })
+    expect(await replayed.json()).toMatchObject({ outcome: 'existing' })
 
     const principal = await repository.findByUserId('user-flow-promote')
     expect(principal?.id).toBe(guestRecord?.principalId)
@@ -195,7 +202,7 @@ describe('identity flow', () => {
     }
 
     const created = await completeIdentity(null, uuidv7())
-    expect(await created.json()).toEqual({ outcome: 'created' })
+    expect(await created.json()).toMatchObject({ outcome: 'created' })
     const formal = await repository.findByUserId('user-flow-merge')
 
     // 別ブラウザでゲストを開始した状況を作る。
@@ -216,7 +223,14 @@ describe('identity flow', () => {
     const merged = await completeIdentity(rawToken, uuidv7())
 
     expect(merged.status).toBe(200)
-    expect(await merged.json()).toEqual({ outcome: 'merged' })
+    expect(await merged.json()).toEqual({
+      actor: {
+        kind: 'user',
+        principalId: formal?.id,
+        userId: 'user-flow-merge',
+      },
+      outcome: 'merged',
+    })
     expect(merged.headers.get('set-cookie')).toContain('Max-Age=0')
 
     // 取り込まれたゲストセッションは失効し、ログアウト後もCookieを再利用できない。
@@ -235,6 +249,33 @@ describe('identity flow', () => {
       .select({ id: schema.principals.id })
       .from(schema.principals)
     expect(remaining.map((row) => row.id)).toEqual([formal?.id])
+  })
+
+  test('rejects a merge key already recorded for another user', async () => {
+    await insertUser('user-flow-owner')
+    await insertUser('user-flow-other')
+
+    currentFormalSession = {
+      userId: 'user-flow-owner',
+      name: 'テスト太郎',
+      image: null,
+      providers: ['google'],
+    }
+    const mergeKey = uuidv7()
+    expect((await completeIdentity(null, mergeKey)).status).toBe(200)
+
+    // 他人の冪等性キーを掴んでも、相手のprincipalへは到達できない。
+    currentFormalSession = {
+      userId: 'user-flow-other',
+      name: 'テスト次郎',
+      image: null,
+      providers: ['github'],
+    }
+    const stolen = await completeIdentity(null, mergeKey)
+
+    expect(stolen.status).toBe(409)
+    expect(await stolen.json()).toMatchObject({ error: { code: 'CONFLICT' } })
+    expect(await repository.findByUserId('user-flow-other')).toBeNull()
   })
 
   test('never replaces the session of an existing guest', async () => {

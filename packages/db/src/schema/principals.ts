@@ -108,7 +108,8 @@ export const identityMerges = pgTable(
   'identity_merges',
   {
     id: uuid('id').primaryKey(),
-    mergeKey: text('merge_key').notNull().unique(),
+    /** OAuthコールバックごとに一意なUUIDv7。型でUUID以外の値を弾く。 */
+    mergeKey: uuid('merge_key').notNull().unique(),
     sourcePrincipalId: uuid('source_principal_id').references(
       () => principals.id,
       { onDelete: 'set null' },

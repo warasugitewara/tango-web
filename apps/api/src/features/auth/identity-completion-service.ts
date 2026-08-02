@@ -1,6 +1,10 @@
 import type { Temporal } from '@js-temporal/polyfill'
-import type { IdentityCompletionOutcome, PrincipalRepository } from '@tango/db'
-import type { Actor } from '@tango/shared'
+import {
+  type IdentityCompletionOutcome,
+  IdentityMergeKeyConflictError,
+  type PrincipalRepository,
+} from '@tango/db'
+import { type Actor, AppError } from '@tango/shared'
 import type { GuestTokenCodec } from './guest-service'
 
 export type FormalActor = Extract<Actor, { kind: 'user' }>
@@ -42,12 +46,25 @@ export function createIdentityCompletionService(
       const guestTokenHash =
         guestRawToken === null ? null : tokenCodec.hash(guestRawToken)
 
-      const { principal, outcome } = await repository.completeIdentity({
-        userId,
-        guestTokenHash,
-        mergeKey,
-        now: new Date(now.epochMilliseconds),
-      })
+      const { principal, outcome } = await repository
+        .completeIdentity({
+          userId,
+          guestTokenHash,
+          mergeKey,
+          now: new Date(now.epochMilliseconds),
+        })
+        .catch((error: unknown) => {
+          // 他人に割り当て済みの冪等性キーは、内部エラーではなく競合として返す。
+          if (error instanceof IdentityMergeKeyConflictError) {
+            throw new AppError('CONFLICT', {
+              publicMessage:
+                'このログイン処理はすでに別のアカウントで完了しています。ログインからやり直してください。',
+              cause: error,
+            })
+          }
+
+          throw error
+        })
 
       return {
         actor: { kind: 'user', principalId: principal.id, userId },

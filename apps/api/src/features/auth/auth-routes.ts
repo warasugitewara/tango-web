@@ -25,8 +25,11 @@ const guestStartSchema = z.object({
 })
 
 const identityCompleteSchema = z.object({
-  /** OAuthコールバックごとに一意な冪等性キー。 */
-  mergeKey: z.uuid(),
+  /**
+   * OAuthコールバックごとに一意な冪等性キー。
+   * 生成順が推測しにくく時系列で並ぶUUIDv7に限定する。
+   */
+  mergeKey: z.uuidv7(),
 })
 
 export type AuthRoutesOptions = {
@@ -122,7 +125,7 @@ export function createAuthRoutes(options: AuthRoutesOptions) {
         const { mergeKey } = context.req.valid('json')
         const guestRawToken = getCookie(context, GUEST_COOKIE_NAME) ?? null
 
-        const { outcome } = await identityCompletionService.complete({
+        const { actor, outcome } = await identityCompletionService.complete({
           userId: formalSession.userId,
           guestRawToken,
           mergeKey,
@@ -134,7 +137,8 @@ export function createAuthRoutes(options: AuthRoutesOptions) {
           clearGuestCookie(context, cookieSecure)
         }
 
-        return context.json({ outcome })
+        // 計画どおり、確定した正式actorと結果の双方を返す。
+        return context.json({ actor, outcome })
       },
     )
 }

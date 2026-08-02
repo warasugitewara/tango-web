@@ -7,6 +7,7 @@ import * as schema from '../schema'
 import { createTestDatabase, resetIdentityTables } from '../test/database'
 import {
   createPrincipalRepository,
+  IdentityMergeKeyConflictError,
   type PrincipalRepository,
 } from './principal-repository'
 
@@ -240,6 +241,51 @@ describe('PrincipalRepository', () => {
     expect(first.outcome).toBe('created')
     expect(second.outcome).toBe('existing')
     expect(second.principal.id).toBe(first.principal.id)
+  })
+
+  test('refuses to hand another user the principal recorded for a merge key', async () => {
+    const now = new Date()
+    const ownerId = await insertFormalUser(now)
+    const otherId = await insertFormalUser(now)
+    const mergeKey = uuidv7()
+
+    const owned = await repository.completeIdentity({
+      userId: ownerId,
+      guestTokenHash: null,
+      mergeKey,
+      now,
+    })
+
+    // 他人の冪等性キーを送っても、その人のprincipalは受け取れない。
+    await expect(
+      repository.completeIdentity({
+        userId: otherId,
+        guestTokenHash: null,
+        mergeKey,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(IdentityMergeKeyConflictError)
+
+    // 送り付けた側にprincipalは作られない。
+    expect(await repository.findByUserId(otherId)).toBeNull()
+    expect((await repository.findByUserId(ownerId))?.id).toBe(
+      owned.principal.id,
+    )
+  })
+
+  test('rejects a merge key that is not a UUID', async () => {
+    // 列の型がUUIDなので、UUID以外の冪等性キーはDBが受け付けない。
+    const now = new Date()
+    const userId = await insertFormalUser(now)
+
+    await expect(
+      repository.completeIdentity({
+        userId,
+        guestTokenHash: null,
+        mergeKey: 'not-a-uuid',
+        now,
+      }),
+    ).rejects.toThrow()
   })
 
   test('rejects a second live guest session for the same principal', async () => {

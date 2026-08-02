@@ -72,6 +72,18 @@ export interface PrincipalRepository {
   }): Promise<PurgeExpiredGuestsResult>
 }
 
+/**
+ * 記録済みの冪等性キーが別ユーザーのprincipalを指していた。
+ * 鍵を再利用・詐称しても他人の学習データへ到達できないよう、
+ * 完了処理をここで打ち切る。
+ */
+export class IdentityMergeKeyConflictError extends Error {
+  constructor() {
+    super('この冪等性キーは別のユーザーに割り当て済みです。')
+    this.name = 'IdentityMergeKeyConflictError'
+  }
+}
+
 /** PostgreSQLの一意制約違反。 */
 const UNIQUE_VIOLATION = '23505'
 
@@ -376,6 +388,13 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
             )
 
             if (principal !== null) {
+              // 記録済みの結果を返す前に、そのprincipalが本人のものか確かめる。
+              // 確かめないと、他人の冪等性キーを送るだけで
+              // 相手のprincipalを受け取れてしまう。
+              if (principal.userId !== userId) {
+                throw new IdentityMergeKeyConflictError()
+              }
+
               return { principal, outcome: 'existing' }
             }
           }

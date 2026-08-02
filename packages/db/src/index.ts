@@ -14,6 +14,7 @@ export {
   type GuestSessionRecord,
   type IdentityCompletionOutcome,
   type IdentityCompletionResult,
+  IdentityMergeKeyConflictError,
   type PrincipalRecord,
   type PrincipalRepository,
   type PurgeExpiredGuestsResult,

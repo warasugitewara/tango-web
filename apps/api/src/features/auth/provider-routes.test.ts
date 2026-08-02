@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Temporal } from '@js-temporal/polyfill'
 import { createDatabase } from '@tango/db'
 import { type ApiErrorEnvelope, AppError } from '@tango/shared'
@@ -289,6 +290,20 @@ describe('POST /api/identity/complete', () => {
     expect(harness.completions).toHaveLength(0)
   })
 
+  test('rejects a merge key that is a UUID of another version', async () => {
+    // 冪等性キーはUUIDv7に限定する。DB側の型も同じ前提で並ぶ。
+    const harness = createHarness({ formalSession: FORMAL_SESSION })
+
+    const response = await harness.app.request('/api/identity/complete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mergeKey: randomUUID() }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(harness.completions).toHaveLength(0)
+  })
+
   test('adopts the guest cookie and clears it after success', async () => {
     const harness = createHarness({ formalSession: FORMAL_SESSION })
 
@@ -302,7 +317,15 @@ describe('POST /api/identity/complete', () => {
     })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ outcome: 'created' })
+    // 契約どおり正式actorと結果の双方を返す。
+    expect(await response.json()).toEqual({
+      actor: {
+        kind: 'user',
+        principalId: 'principal-formal',
+        userId: 'user-1',
+      },
+      outcome: 'created',
+    })
     expect(harness.completions).toEqual([
       { userId: 'user-1', guestRawToken: VALID_RAW_TOKEN },
     ])

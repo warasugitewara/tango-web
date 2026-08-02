@@ -8,6 +8,13 @@
       "when": 1785554551046,
       "tag": "0000_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785643220710,
+      "tag": "0001_identity_merge_key_uuid",
+      "breakpoints": true
     }
   ]
 }
