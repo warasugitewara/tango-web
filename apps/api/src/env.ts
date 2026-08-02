@@ -1,23 +1,44 @@
 import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
 
-const environmentSchema = z.object({
-  APP_ENV: z.enum(['development', 'test', 'production']),
-  APP_ORIGIN: z.url(),
-  DATABASE_URL: z.string().min(1),
-  /** ゲストトークンのHMACペッパーを格納したファイルのパス。値自体は環境変数に置かない。 */
-  GUEST_TOKEN_PEPPER_FILE: z.string().min(1),
-  /** Cloudflare Turnstileのシークレットを格納したファイルのパス。 */
-  TURNSTILE_SECRET_FILE: z.string().min(1),
-  /** Better Authの署名・暗号化に使うシークレットを格納したファイルのパス。 */
-  BETTER_AUTH_SECRET_FILE: z.string().min(1),
-  GOOGLE_CLIENT_ID: z.string().min(1),
-  /** GoogleのOAuthクライアントシークレットを格納したファイルのパス。 */
-  GOOGLE_CLIENT_SECRET_FILE: z.string().min(1),
-  GITHUB_CLIENT_ID: z.string().min(1),
-  /** GitHubのOAuthクライアントシークレットを格納したファイルのパス。 */
-  GITHUB_CLIENT_SECRET_FILE: z.string().min(1),
-})
+/**
+ * 本番で唯一許可する公開オリジン。
+ * ここを固定することでCookieのSecure属性がhttpへ落ちる経路をなくす。
+ */
+export const PRODUCTION_APP_ORIGIN = 'https://tango.warasugi.com'
+
+const environmentSchema = z
+  .object({
+    APP_ENV: z.enum(['development', 'test', 'production']),
+    APP_ORIGIN: z.url(),
+    DATABASE_URL: z.string().min(1),
+    /** ゲストトークンのHMACペッパーを格納したファイルのパス。値自体は環境変数に置かない。 */
+    GUEST_TOKEN_PEPPER_FILE: z.string().min(1),
+    /** Cloudflare Turnstileのシークレットを格納したファイルのパス。 */
+    TURNSTILE_SECRET_FILE: z.string().min(1),
+    /** Better Authの署名・暗号化に使うシークレットを格納したファイルのパス。 */
+    BETTER_AUTH_SECRET_FILE: z.string().min(1),
+    GOOGLE_CLIENT_ID: z.string().min(1),
+    /** GoogleのOAuthクライアントシークレットを格納したファイルのパス。 */
+    GOOGLE_CLIENT_SECRET_FILE: z.string().min(1),
+    GITHUB_CLIENT_ID: z.string().min(1),
+    /** GitHubのOAuthクライアントシークレットを格納したファイルのパス。 */
+    GITHUB_CLIENT_SECRET_FILE: z.string().min(1),
+  })
+  .superRefine((value, ctx) => {
+    // 本番のオリジンを取り違えると、Secure Cookieが外れたまま起動してしまう。
+    // 設定ミスは起動前に落とす。
+    if (
+      value.APP_ENV === 'production' &&
+      value.APP_ORIGIN !== PRODUCTION_APP_ORIGIN
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['APP_ORIGIN'],
+        message: `productionでは ${PRODUCTION_APP_ORIGIN} 以外を指定できません。`,
+      })
+    }
+  })
 
 export type Env = Readonly<z.infer<typeof environmentSchema>>
 
@@ -41,6 +62,16 @@ export function loadEnv(source: Record<string, string | undefined>): Env {
   }
 
   return Object.freeze(result.data)
+}
+
+/**
+ * CookieへSecure属性を付けるかどうかを決める。
+ * `loadEnv` がproductionのAPP_ORIGINをhttpsの固定値に縛るため、
+ * production起動時にこの関数がfalseを返すことはない。
+ * ローカルのhttp検証でだけfalseになる。
+ */
+export function isSecureCookieOrigin(env: Env): boolean {
+  return new URL(env.APP_ORIGIN).protocol === 'https:'
 }
 
 /**

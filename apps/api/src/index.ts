@@ -1,6 +1,6 @@
 import { createDatabase, createPrincipalRepository } from '@tango/db'
 import { createApp } from './app'
-import { loadEnv, readSecretFile } from './env'
+import { isSecureCookieOrigin, loadEnv, readSecretFile } from './env'
 import { createActorResolver } from './features/auth/actor-resolver'
 import { createAuth } from './features/auth/better-auth'
 import { createFormalSessionReader } from './features/auth/formal-session-reader'
@@ -28,7 +28,7 @@ const [
   readSecretFile(env.GITHUB_CLIENT_SECRET_FILE),
 ])
 
-const cookieSecure = new URL(env.APP_ORIGIN).protocol === 'https:'
+const cookieSecure = isSecureCookieOrigin(env)
 
 const database = createDatabase(env.DATABASE_URL)
 const repository = createPrincipalRepository(database.db)
