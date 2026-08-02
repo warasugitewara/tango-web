@@ -4,6 +4,7 @@ import { createAuthRoutes } from './features/auth/auth-routes'
 import type { Clock, GuestService } from './features/auth/guest-service'
 import type { IdentityCompletionService } from './features/auth/identity-completion-service'
 import { errorHandler } from './middleware/error-handler'
+import { jsonBodyGuard } from './middleware/json-body-guard'
 import {
   type AppEnv,
   requestContext,
@@ -32,6 +33,9 @@ export function createApp(deps: AppDependencies) {
   app.on(['GET', 'POST'], '/api/auth/*', (context) =>
     deps.authHandler(context.req.raw),
   )
+
+  // Better Authは自前のボディ検証を持つため、その委譲より後ろに置く。
+  app.use('/api/*', jsonBodyGuard())
 
   // ヘルスチェックは認証文脈を必要としないので /api 配下だけに適用する。
   app.use(

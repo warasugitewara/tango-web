@@ -1,5 +1,6 @@
 import { AppError, toApiErrorEnvelope } from '@tango/shared'
 import type { Context, ErrorHandler } from 'hono'
+import { HTTPException } from 'hono/http-exception'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { v7 as uuidv7 } from 'uuid'
 import type { AppEnv } from './request-context'
@@ -88,13 +89,32 @@ function toSafeStackFrames(error: unknown): string[] {
 }
 
 /**
+ * Honoが投げるHTTPExceptionのうち、送信内容の不備によるものを揃える。
+ * `hono/validator` は壊れたJSONをHTTPException(400)にするため、
+ * そのままでは想定外の例外として500へ倒れ、利用者に原因が伝わらない。
+ * 元の例外はcauseとして内部に残し、公開する文言は日本語の定型にする。
+ */
+function normalizeError(error: unknown): unknown {
+  if (!(error instanceof HTTPException) || error.status !== 400) {
+    return error
+  }
+
+  return new AppError('VALIDATION_FAILED', {
+    publicMessage:
+      'リクエストの本文を解釈できませんでした。JSON形式で送信してください。',
+    cause: error,
+  })
+}
+
+/**
  * 例外を共通エンベロープへ写像する。
  * サーバログには分類・内部エラーID・サニタイズ済みの呼び出し位置だけを残す。
  * 例外メッセージ、Cookie、リクエストボディ、接続URL、カード内容は
  * どの経路からもログへ出さない。
  */
 export function errorHandler(): ErrorHandler<AppEnv> {
-  return (error, context: Context<AppEnv>) => {
+  return (rawError, context: Context<AppEnv>) => {
+    const error = normalizeError(rawError)
     const requestId = context.get('requestId') ?? ''
     const envelope = toApiErrorEnvelope(error, requestId)
     const status =

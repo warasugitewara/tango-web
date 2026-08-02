@@ -1,6 +1,7 @@
 import { type ApiErrorEnvelope, AppError, parseJstInstant } from '@tango/shared'
 import { beforeEach, describe, expect, test } from 'vitest'
 import { createApp } from '../../app'
+import { MAX_REQUEST_BODY_BYTES } from '../../middleware/json-body-guard'
 import type { ActorResolver, FormalSession } from './actor-resolver'
 import {
   GUEST_COOKIE_NAME,
@@ -336,6 +337,103 @@ describe('GET /api/session', () => {
       authenticated: true,
       kind: 'user',
     })
+  })
+})
+
+describe('request body boundaries', () => {
+  let harness: Harness
+
+  beforeEach(() => {
+    harness = createHarness({})
+  })
+
+  test('normalizes malformed JSON into VALIDATION_FAILED', async () => {
+    const response = await harness.app.request('/api/guest/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"turnstileToken":',
+    })
+
+    expect(response.status).toBe(400)
+
+    const body = await readErrorEnvelope(response)
+    expect(body.error.code).toBe('VALIDATION_FAILED')
+    expect(body.error.message).toContain('JSON形式')
+    expect(harness.startCalls).toHaveLength(0)
+  })
+
+  test('normalizes an empty body into VALIDATION_FAILED', async () => {
+    const response = await harness.app.request('/api/guest/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    })
+
+    expect(response.status).toBe(400)
+    expect((await readErrorEnvelope(response)).error.code).toBe(
+      'VALIDATION_FAILED',
+    )
+    expect(harness.startCalls).toHaveLength(0)
+  })
+
+  test('rejects a body sent without a JSON content type', async () => {
+    const response = await harness.app.request('/api/guest/start', {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({ turnstileToken: 'valid-token' }),
+    })
+
+    expect(response.status).toBe(400)
+
+    const body = await readErrorEnvelope(response)
+    expect(body.error.code).toBe('VALIDATION_FAILED')
+    expect(body.error.message).toContain('Content-Type')
+    expect(harness.startCalls).toHaveLength(0)
+  })
+
+  test('accepts a JSON content type that carries a charset', async () => {
+    const response = await harness.app.request('/api/guest/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ turnstileToken: 'valid-token' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(harness.startCalls).toHaveLength(1)
+  })
+
+  test('rejects a body that exceeds the size limit', async () => {
+    const oversized = JSON.stringify({
+      turnstileToken: 'a'.repeat(MAX_REQUEST_BODY_BYTES),
+    })
+
+    const response = await harness.app.request('/api/guest/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: oversized,
+    })
+
+    expect(response.status).toBe(400)
+
+    const body = await readErrorEnvelope(response)
+    expect(body.error.code).toBe('VALIDATION_FAILED')
+    expect(body.error.message).toContain('大きすぎます')
+    expect(harness.startCalls).toHaveLength(0)
+  })
+
+  test('accepts a body that sits just under the size limit', async () => {
+    // 上限ぎりぎりの本文を誤って弾かないことも確かめる。
+    const filler = 'a'.repeat(
+      MAX_REQUEST_BODY_BYTES - JSON.stringify({ turnstileToken: '' }).length,
+    )
+
+    const response = await harness.app.request('/api/guest/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ turnstileToken: filler }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(harness.startCalls).toHaveLength(1)
   })
 })
 
