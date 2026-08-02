@@ -1,6 +1,6 @@
 import type { Temporal } from '@js-temporal/polyfill'
 import type { PrincipalRepository } from '@tango/db'
-import type { Actor } from '@tango/shared'
+import { type Actor, formatJst } from '@tango/shared'
 
 export type SocialProvider = 'google' | 'github'
 
@@ -90,7 +90,8 @@ export function toGuestSessionView(
   return {
     authenticated: true,
     kind: 'guest',
-    expiresAt: expiresAt.toString(),
+    // 画面はJST前提で日時を扱うため、境界では必ず +09:00 を明示する。
+    expiresAt: formatJst(expiresAt),
     warning,
   }
 }

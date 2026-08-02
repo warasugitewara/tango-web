@@ -1,4 +1,9 @@
-import { type ApiErrorEnvelope, AppError, parseJstInstant } from '@tango/shared'
+import {
+  type ApiErrorEnvelope,
+  AppError,
+  formatJst,
+  parseJstInstant,
+} from '@tango/shared'
 import { beforeEach, describe, expect, test } from 'vitest'
 import { createApp } from '../../app'
 import { MAX_REQUEST_BODY_BYTES } from '../../middleware/json-body-guard'
@@ -12,6 +17,8 @@ import {
 
 const NOW = parseJstInstant('2026-08-01T10:00:00+09:00')
 const GUEST_EXPIRES_AT = NOW.add({ hours: 24 * GUEST_SESSION_DAYS })
+/** APIが返す期限はJSTのオフセットを明示した形式に固定する。 */
+const GUEST_EXPIRES_AT_JST = formatJst(GUEST_EXPIRES_AT)
 const VALID_RAW_TOKEN = 'valid-raw-token'
 const STALE_RAW_TOKEN = 'stale-raw-token'
 
@@ -125,9 +132,11 @@ describe('POST /api/guest/start', () => {
     expect(await response.json()).toEqual({
       authenticated: true,
       kind: 'guest',
-      expiresAt: GUEST_EXPIRES_AT.toString(),
+      expiresAt: GUEST_EXPIRES_AT_JST,
       warning: GUEST_RISK_NOTICE,
     })
+    // JSTのオフセットを明示しないと画面側で解釈が揺れる。
+    expect(GUEST_EXPIRES_AT_JST).toMatch(/\+09:00$/)
 
     const cookie = response.headers.get('set-cookie')
     expect(cookie).toContain(`${GUEST_COOKIE_NAME}=`)
@@ -200,7 +209,7 @@ describe('POST /api/guest/start', () => {
     expect(await response.json()).toEqual({
       authenticated: true,
       kind: 'guest',
-      expiresAt: GUEST_EXPIRES_AT.toString(),
+      expiresAt: GUEST_EXPIRES_AT_JST,
       warning: GUEST_RISK_NOTICE,
     })
     // 新しいゲストを作らず、Cookieも書き換えない。
@@ -251,7 +260,7 @@ describe('GET /api/session', () => {
     expect(await response.json()).toEqual({
       authenticated: true,
       kind: 'guest',
-      expiresAt: GUEST_EXPIRES_AT.toString(),
+      expiresAt: GUEST_EXPIRES_AT_JST,
       warning: GUEST_RISK_NOTICE,
     })
   })
