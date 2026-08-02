@@ -14,6 +14,67 @@ import { createDatabase, type Database, type DatabaseHandle } from '../client'
 const DEFAULT_TEST_DATABASE_URL =
   'postgres://tango_test:tango_test@127.0.0.1:55432/tango_test'
 
+/** テストDBとして許可するホスト。ループバック以外は受け付けない。 */
+const ALLOWED_HOSTS: ReadonlySet<string> = new Set([
+  '127.0.0.1',
+  'localhost',
+  '[::1]',
+])
+
+/** テストDBとして必須のデータベース名接尾辞。 */
+const REQUIRED_DATABASE_SUFFIX = '_test'
+
+const ALLOWED_PROTOCOLS: ReadonlySet<string> = new Set([
+  'postgres:',
+  'postgresql:',
+])
+
+/**
+ * 接続先がテスト専用インスタンスであることを確認する。
+ * このモジュールは全テーブルをTRUNCATE CASCADEするため、
+ * 設定ミスで開発用や本番のデータベースへ向いた瞬間にデータを失う。
+ * 破壊的な操作の手前で必ず落とす。
+ *
+ * エラーメッセージにはホスト名とデータベース名だけを載せ、
+ * 接続URLと認証情報は決して含めない。
+ */
+export function assertTestDatabaseUrl(rawUrl: string): void {
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    throw new Error('TEST_DATABASE_URL をURLとして解釈できません。')
+  }
+
+  if (!ALLOWED_PROTOCOLS.has(url.protocol)) {
+    throw new Error(
+      `TEST_DATABASE_URL はPostgreSQLの接続URLである必要があります: ${url.protocol}`,
+    )
+  }
+
+  if (!ALLOWED_HOSTS.has(url.hostname)) {
+    throw new Error(
+      `TEST_DATABASE_URL のホストがループバックではありません: ${url.hostname}。` +
+        ' テストは全テーブルをTRUNCATEするため、テスト専用インスタンス以外へは接続しない。',
+    )
+  }
+
+  const database = decodeURIComponent(url.pathname.replace(/^\//, ''))
+
+  if (!database.endsWith(REQUIRED_DATABASE_SUFFIX)) {
+    throw new Error(
+      `TEST_DATABASE_URL のデータベース名が "${REQUIRED_DATABASE_SUFFIX}" で終わっていません: ${database || '(未指定)'}。` +
+        ' テスト専用のデータベースだけを対象にする。',
+    )
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NODE_ENV=production ではテスト用データベースヘルパを実行できません。',
+    )
+  }
+}
+
 export const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? DEFAULT_TEST_DATABASE_URL
 
@@ -42,8 +103,11 @@ let migrationPromise: Promise<void> | null = null
 
 /**
  * テストDBへ接続し、プロセス内で一度だけマイグレーションを適用する。
+ * 接続する前に、接続先がテスト専用インスタンスであることを必ず確認する。
  */
 export async function createTestDatabase(): Promise<DatabaseHandle> {
+  assertTestDatabaseUrl(TEST_DATABASE_URL)
+
   const handle = createDatabase(TEST_DATABASE_URL, { max: 5 })
 
   migrationPromise ??= migrate(handle.db, {
@@ -77,8 +141,11 @@ export async function dumpIdentityText(db: Database): Promise<string> {
 
 /**
  * 識別まわりの全テーブルを空にする。テストごとの独立性を担保する。
+ * 破壊的な操作なので、ここでも接続先がテスト専用かを再確認する。
  */
 export async function resetIdentityTables(db: Database): Promise<void> {
+  assertTestDatabaseUrl(TEST_DATABASE_URL)
+
   const targets = RESETTABLE_TABLES.map((table) => `"${table}"`).join(', ')
   await db.execute(
     sql.raw(`truncate table ${targets} restart identity cascade`),
