@@ -2,11 +2,11 @@
 
 - 更新日: 2026-08-05
 - 対象ブランチ: `feat/phase-1-foundation-identity`
-- commit済み対象範囲: `main` (`314264f`) から HEAD (`b08ba5b`) まで（新規commitなし、HEADは2026-08-02から変わらず）
-- 未commit対象: Phase 1全体レビューのImportant 6件を解消する「最終ハードニング」Task 1〜4、および従来から未commitだったTask 8/9/10相当の変更を含む単一の論理境界（下表参照）。すべて1 commitへまとめる予定でcommit許可待ち
+- commit済み対象範囲: `main` (`314264f`) から HEAD (`f26104c`) まで
+- 最終ハードニングのcommit: `f26104c` `fix: Phase 1レビュー指摘を一括解消する`（47ファイル）。Phase 1全体レビューのImportant 6件を解消する「最終ハードニング」Task 1〜4、および従来から未commitだったTask 8/9/10相当の変更を、計画どおり単一commitへまとめた（下表参照）
 - 計画: `docs/superpowers/plans/2026-08-01-tango-01-foundation-identity.md`（初回実装）、`docs/superpowers/plans/2026-08-02-tango-phase-1-final-hardening.md`（今回の最終ハードニング、Task 1〜5）
 - 仕様: `docs/superpowers/specs/2026-08-01-tango-spaced-repetition-design.md`（初回設計）、`docs/superpowers/specs/2026-08-02-tango-phase-1-final-hardening-design.md`（今回のハードニング設計、§1〜§4）
-- 状態: Phase 2未着手、pushなし、Codexが利用制限に到達したため今回のTask 1〜3独立レビューはClaudeが統括しタスクごとに別Sub-agentで実施（詳細は`docs/reviews/phase-1-codex-review.md`追記部）。未commit差分はcommit許可待ち
+- 状態: Phase 2未着手、pushなし、Codexが利用制限に到達したため今回のTask 1〜3独立レビューはClaudeが統括しタスクごとに別Sub-agentで実施（詳細は`docs/reviews/phase-1-codex-review.md`追記部）。差分は`f26104c`としてcommit済みで、pushはしていない
 
 レビュー観点（計画 Task 6 Step 7、および最終ハードニング計画 Task 5 Step 2）: 仕様適合、識別処理の競合、Cookieとトークンの取り扱い、Better Auth設定、migration、テスト証跡、env/maintenance jobのfail-closed境界。
 
@@ -45,7 +45,7 @@ git diff --stat 314264f..HEAD
 
 ### 未commitの論理境界
 
-未commit差分にcommit SHAは存在しない。存在しないSHAを捏造しない。2026-08-02時点でP2-3/P2-4/P2-6/P2-9/P3-1/P3-2/P3-3/Task 10として個別に記載していた論理境界は、いずれも一度もcommitされないまま今回の最終ハードニングTask 1〜4と同じ working tree 上で重ね書きされ、境界が実質的に一体化した。したがって本改訂では、2026-08-02〜08-05に実施した最終ハードニング計画のTask単位で論理境界を書き直す。全体をTask 5完了後に**単一の日本語Conventional Commit**（計画上の想定メッセージ: `fix: Phase 1レビュー指摘を一括解消する`）へまとめる予定であり、現時点ではその commit も存在しない。
+下表の論理境界はすべて`f26104c`という単一commitに含まれる。区分ごとの個別commitは存在しないため、区分単位のSHAを捏造しない。2026-08-02時点でP2-3/P2-4/P2-6/P2-9/P3-1/P3-2/P3-3/Task 10として個別に記載していた論理境界は、いずれも一度もcommitされないまま今回の最終ハードニングTask 1〜4と同じ working tree 上で重ね書きされ、境界が実質的に一体化した。したがって本改訂では、2026-08-02〜08-05に実施した最終ハードニング計画のTask単位で論理境界を書き直す。全体はTask 5完了後に**単一の日本語Conventional Commit** `f26104c` `fix: Phase 1レビュー指摘を一括解消する` へまとめた。下表の「状態」列はこのcommitへ入る直前のworking tree上の状態を記録したものである。
 
 | 区分 | 状態 | 主な変更（対応する旧区分） |
 | --- | --- | --- |
@@ -284,9 +284,9 @@ export async function moveOwnedDomainRows(
 ## 9. 再レビュー時の残件
 
 1. 実Google/GitHub OAuth 5シナリオは未実施。実資格情報と対話ブラウザが必要であり、provider mock境界テスト（Task 1の成功callback testを含む）を実OAuthの代替完了とは扱わない。
-2. 最終ハードニングTask 1〜4、および従来から未commitだったTask 8/9/10相当の変更を含め、本レビューpacket更新時点で**すべて未commit**。この後1件の日本語Conventional Commitへまとめる予定だが、まだcommitは実行していない。1章の「未commitの論理境界」表を参照。
+2. 最終ハードニングTask 1〜4、および従来から未commitだったTask 8/9/10相当の変更は、計画どおり1件の日本語Conventional Commit `f26104c` `fix: Phase 1レビュー指摘を一括解消する`（47ファイル）へまとめた。1章の論理境界表を参照。本節のこの記述だけは`f26104c`の後続commitで追記している。
 3. pushしていないため、GitHub CIは最新worktree差分では未実行。
 4. application CSRF、security headers、汎用rate limitはPhase 4のmandatory release gate。Phase 2のaudit writerを追加する前にevent別allowlist schemaを必須化する。
 5. Minor findings（guest touch CAS = M-1、test migration failure recovery = M-2、domain schema drift CI = M-4）はPhase 2開始を妨げない追跡事項として残る（6章参照）。
-6. 今回のレビュー体制の変更: 従来の親方レビュアーであったCodexが利用制限に到達したため、Task 1〜3の独立レビューはClaudeが統括し、タスクごとに別のSub-agentへ分離して実施した（Task 1: PASS。Task 2: Important 1件を検出し修正後にPASS。Task 3: PASS）。Task 4には同形式の独立レビュー記録はない。実OAuth以外の自動ゲート（`bun install`、`bun run check`、`bun run build`、`db:auth-schema:check`、`db:generate`、`db:migrate`）はすべて2026-08-05にfresh再実行済み。
+6. 今回のレビュー体制の変更: 従来の親方レビュアーであったCodexが利用制限に到達したため、Task 1〜3の独立レビューはClaudeが統括し、タスクごとに別のSub-agentへ分離して実施した（Task 1: PASS。Task 2: Important 1件を検出し修正後にPASS。Task 3: PASS）。Task 4には同形式の独立レビュー記録はない。計画 Task 5 Step 4 の「base `314264f`からworktree全体をfresh reviewerへ渡す最終ブランチレビュー」は、利用制限を優先して**未実施**であり、Task 1〜3の独立レビュー3件と禁止パターンの機械走査（`any`/`@ts-ignore`/広い型assertion/非nullアサーション/secret/stage scope、いずれもヒットなし）で代替した。実OAuth以外の自動ゲート（`bun install`、`bun run check`、`bun run build`、`db:auth-schema:check`、`db:generate`、`db:migrate`）はすべて2026-08-05にfresh再実行済み。
 7. Phase 2には進まず、上記commitとGitHub CI実行後の再レビュー判定を待つ。
