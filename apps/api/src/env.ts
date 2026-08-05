@@ -7,24 +7,60 @@ import { z } from 'zod'
  */
 export const PRODUCTION_APP_ORIGIN = 'https://tango.warasugi.com'
 
+/** 接続先として受け入れるプロトコル。PostgreSQL以外へは決して接続させない。 */
+const POSTGRES_PROTOCOLS: ReadonlySet<string> = new Set([
+  'postgres:',
+  'postgresql:',
+])
+
+/**
+ * PostgreSQLの接続URLとして解釈できるかどうかだけを判定する。
+ * 判定結果には値を一切含めない。呼び出し側もキー名しか報告しない。
+ */
+function isPostgresConnectionUrl(value: string): boolean {
+  let url: URL
+
+  try {
+    url = new URL(value)
+  } catch {
+    return false
+  }
+
+  return POSTGRES_PROTOCOLS.has(url.protocol)
+}
+
+const environmentShape = {
+  APP_ENV: z.enum(['development', 'test', 'production']),
+  APP_ORIGIN: z.url(),
+  /**
+   * PostgreSQLの接続URL。解釈できない値やプロトコル違いは起動前に落とす。
+   * エラーメッセージには値を載せない（パスワードが含まれるため）。
+   */
+  DATABASE_URL: z.string().min(1).refine(isPostgresConnectionUrl, {
+    message: 'postgres: または postgresql: のURLを指定してください。',
+  }),
+  /** ゲストトークンのHMACペッパーを格納したファイルのパス。値自体は環境変数に置かない。 */
+  GUEST_TOKEN_PEPPER_FILE: z.string().min(1),
+  TURNSTILE_SITE_KEY: z.string().min(1),
+  /** Cloudflare Turnstileのシークレットを格納したファイルのパス。 */
+  TURNSTILE_SECRET_FILE: z.string().min(1),
+  /** Better Authの署名・暗号化に使うシークレットを格納したファイルのパス。 */
+  BETTER_AUTH_SECRET_FILE: z.string().min(1),
+  GOOGLE_CLIENT_ID: z.string().min(1),
+  /** GoogleのOAuthクライアントシークレットを格納したファイルのパス。 */
+  GOOGLE_CLIENT_SECRET_FILE: z.string().min(1),
+  GITHUB_CLIENT_ID: z.string().min(1),
+  /** GitHubのOAuthクライアントシークレットを格納したファイルのパス。 */
+  GITHUB_CLIENT_SECRET_FILE: z.string().min(1),
+}
+
+/** `.env.example` と同期すべき、アプリ固有の環境変数キー。 */
+export const ENVIRONMENT_KEYS = Object.freeze(
+  Object.keys(environmentShape).sort(),
+)
+
 const environmentSchema = z
-  .object({
-    APP_ENV: z.enum(['development', 'test', 'production']),
-    APP_ORIGIN: z.url(),
-    DATABASE_URL: z.string().min(1),
-    /** ゲストトークンのHMACペッパーを格納したファイルのパス。値自体は環境変数に置かない。 */
-    GUEST_TOKEN_PEPPER_FILE: z.string().min(1),
-    /** Cloudflare Turnstileのシークレットを格納したファイルのパス。 */
-    TURNSTILE_SECRET_FILE: z.string().min(1),
-    /** Better Authの署名・暗号化に使うシークレットを格納したファイルのパス。 */
-    BETTER_AUTH_SECRET_FILE: z.string().min(1),
-    GOOGLE_CLIENT_ID: z.string().min(1),
-    /** GoogleのOAuthクライアントシークレットを格納したファイルのパス。 */
-    GOOGLE_CLIENT_SECRET_FILE: z.string().min(1),
-    GITHUB_CLIENT_ID: z.string().min(1),
-    /** GitHubのOAuthクライアントシークレットを格納したファイルのパス。 */
-    GITHUB_CLIENT_SECRET_FILE: z.string().min(1),
-  })
+  .object(environmentShape)
   .superRefine((value, ctx) => {
     // 本番のオリジンを取り違えると、Secure Cookieが外れたまま起動してしまう。
     // 設定ミスは起動前に落とす。

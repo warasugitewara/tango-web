@@ -3,7 +3,7 @@ import { Temporal } from '@js-temporal/polyfill'
 import { createDatabase } from '@tango/db'
 import { type ApiErrorEnvelope, AppError } from '@tango/shared'
 import { v7 as uuidv7 } from 'uuid'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import { createApp } from '../../app'
 import type { ActorResolver, FormalSession } from './actor-resolver'
 import { createAuth, createBetterAuthOptions } from './better-auth'
@@ -23,7 +23,13 @@ const FORMAL_SESSION: FormalSession = {
 }
 
 /** 接続はしない。オプション生成にDrizzleインスタンスが必要なだけ。 */
-function createOptions() {
+function createOptions(
+  authLogSink?: (entry: {
+    component: 'better-auth'
+    level: 'debug' | 'info' | 'warn' | 'error'
+    errorId: string
+  }) => void,
+) {
   const handle = createDatabase(
     'postgres://options-only@127.0.0.1:5432/unused',
     { max: 1 },
@@ -35,6 +41,7 @@ function createOptions() {
     google: { clientId: 'google-id', clientSecret: 'google-secret' },
     github: { clientId: 'github-id', clientSecret: 'github-secret' },
     useSecureCookies: true,
+    ...(authLogSink === undefined ? {} : { authLogSink }),
   })
 }
 
@@ -191,6 +198,101 @@ describe('Better Auth configuration', () => {
 
   test('sends no telemetry', () => {
     expect(options.telemetry?.enabled).toBe(false)
+  })
+
+  test('discards Better Auth messages and raw arguments before structured logging', () => {
+    const entries: Array<{
+      component: 'better-auth'
+      level: 'debug' | 'info' | 'warn' | 'error'
+      errorId: string
+    }> = []
+    const safeOptions = createOptions((entry) => entries.push(entry))
+    const log = safeOptions.logger?.log
+    if (log === undefined) {
+      throw new Error('Better Authのsafe loggerが設定されていません。')
+    }
+
+    const dummySecretUrlMarker =
+      'https://dummy-secret-marker.invalid/callback?token=dummy-token-marker'
+    const dummyCardMarker = 'DUMMY-CARD-LIKE-MARKER-0000'
+    const error = new Error(
+      `provider failure ${dummySecretUrlMarker} ${dummyCardMarker}`,
+    )
+    log('error', error.message, error, {
+      providerResponse: dummySecretUrlMarker,
+      card: dummyCardMarker,
+    })
+
+    expect(entries).toEqual([
+      {
+        component: 'better-auth',
+        level: 'error',
+        errorId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
+      },
+    ])
+    const serialized = JSON.stringify(entries)
+    expect(serialized).not.toContain(dummySecretUrlMarker)
+    expect(serialized).not.toContain(dummyCardMarker)
+    expect(serialized).not.toContain(error.message)
+    expect(serialized).not.toContain(error.stack)
+  })
+
+  test('does not propagate a custom sink failure or retry it through console', () => {
+    const dummySinkFailureMarker = 'DUMMY-SINK-FAILURE-MARKER'
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    try {
+      const safeOptions = createOptions(() => {
+        throw new Error(dummySinkFailureMarker)
+      })
+      const log = safeOptions.logger?.log
+      if (log === undefined) {
+        throw new Error('Better Authのsafe loggerが設定されていません。')
+      }
+
+      expect(() =>
+        log('error', 'DUMMY-RAW-MESSAGE-MARKER', {
+          token: 'DUMMY-RAW-TOKEN-MARKER',
+        }),
+      ).not.toThrow()
+      expect(consoleError).not.toHaveBeenCalled()
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  test('does not propagate a default console sink failure or expose raw input', () => {
+    const dummyConsoleFailureMarker = 'DUMMY-CONSOLE-FAILURE-MARKER'
+    const dummyRawMessageMarker = 'DUMMY-RAW-CONSOLE-MESSAGE-MARKER'
+    const dummyRawTokenMarker = 'DUMMY-RAW-CONSOLE-TOKEN-MARKER'
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {
+      throw new Error(dummyConsoleFailureMarker)
+    })
+
+    try {
+      const safeOptions = createOptions()
+      const log = safeOptions.logger?.log
+      if (log === undefined) {
+        throw new Error('Better Authのsafe loggerが設定されていません。')
+      }
+
+      expect(() =>
+        log('error', dummyRawMessageMarker, {
+          token: dummyRawTokenMarker,
+        }),
+      ).not.toThrow()
+      expect(consoleError).toHaveBeenCalledTimes(1)
+      const serializedConsoleCalls = JSON.stringify(consoleError.mock.calls)
+      expect(serializedConsoleCalls).not.toContain(dummyRawMessageMarker)
+      expect(serializedConsoleCalls).not.toContain(dummyRawTokenMarker)
+      expect(serializedConsoleCalls).not.toContain(dummyConsoleFailureMarker)
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   test('rejects email and password sign-up at runtime', async () => {

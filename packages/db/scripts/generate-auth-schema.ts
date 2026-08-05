@@ -1,11 +1,4 @@
-/**
- * Better Auth生成スキーマのドリフト検査。
- *
- * ピン留めしたCLIで一時パスへ再生成し、コミット済みの
- * `packages/db/src/schema/auth.generated.ts` と1バイトでも異なれば失敗する。
- * 生成は設定の読み込みだけで完結しDBへは接続しないため、CIでも追加サービスは不要。
- */
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { transformBetterAuthPostgresSchema } from './auth-schema'
@@ -17,7 +10,6 @@ const CHECKED_IN_PATH = 'packages/db/src/schema/auth.generated.ts'
 
 const repositoryRoot = resolve(import.meta.dir, '..', '..', '..')
 
-// 設定はダミー値で完結するため環境変数の注入は不要。呼び出し元の環境をそのまま渡す。
 function buildEnv(): Record<string, string> {
   const env: Record<string, string> = {}
 
@@ -32,19 +24,20 @@ function buildEnv(): Record<string, string> {
 
 async function main(): Promise<void> {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'tango-auth-schema-'))
-  const temporaryOutput = join(temporaryDirectory, 'auth.generated.ts')
+  const rawOutput = join(temporaryDirectory, 'auth.raw.ts')
 
   try {
     const generation = Bun.spawn(
       [
         // authパッケージ自身のbin launcherと同じNode実行に揃える。
+        // Bunで直接実行すると関数defaultの解析結果が変わり、生成物が不安定になる。
         'node',
         CLI_ENTRYPOINT,
         'generate',
         '--config',
         CONFIG_PATH,
         '--output',
-        temporaryOutput,
+        rawOutput,
         '--yes',
       ],
       {
@@ -56,7 +49,6 @@ async function main(): Promise<void> {
     )
 
     const exitCode = await generation.exited
-
     if (exitCode !== 0) {
       const stderr = await new Response(generation.stderr).text()
       throw new Error(
@@ -64,21 +56,15 @@ async function main(): Promise<void> {
       )
     }
 
-    const [rawRegenerated, checkedIn] = await Promise.all([
-      readFile(temporaryOutput, 'utf8'),
-      readFile(resolve(repositoryRoot, CHECKED_IN_PATH), 'utf8'),
-    ])
-    const regenerated = transformBetterAuthPostgresSchema(rawRegenerated)
-
-    if (regenerated !== checkedIn) {
-      throw new Error(
-        `${CHECKED_IN_PATH} が ${CLI_PACKAGE} の生成結果と一致しません。` +
-          '生成物を手で編集せず、bun run db:auth-schema で再生成してください。',
-      )
-    }
-
+    const generated = await readFile(rawOutput, 'utf8')
+    const transformed = transformBetterAuthPostgresSchema(generated)
+    await writeFile(
+      resolve(repositoryRoot, CHECKED_IN_PATH),
+      transformed,
+      'utf8',
+    )
     console.log(
-      `${CHECKED_IN_PATH} は ${CLI_PACKAGE} の生成結果とTIMESTAMPTZ変換に一致します。`,
+      `${CHECKED_IN_PATH} を ${CLI_PACKAGE} からTIMESTAMPTZ変換付きで再生成しました。`,
     )
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true })

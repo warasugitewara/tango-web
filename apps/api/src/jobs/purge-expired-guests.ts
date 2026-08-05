@@ -1,8 +1,12 @@
-import { Temporal } from '@js-temporal/polyfill'
 import type { PrincipalRepository } from '@tango/db'
 import { createDatabase, createPrincipalRepository } from '@tango/db'
+import { AppError, parseJstInstant, toSafeErrorName } from '@tango/shared'
+import { v7 as uuidv7 } from 'uuid'
 import { loadEnv } from '../env'
 import { type Clock, createSystemClock } from '../features/auth/guest-service'
+
+/** ログの相関に使うjob識別子。 */
+const JOB_NAME = 'purge-expired-guests'
 
 /** 1回のDELETEで扱う上限。長いロックを避けるため小さく保つ。 */
 const BATCH_SIZE = 500
@@ -50,22 +54,68 @@ export async function purgeExpiredGuests(
   return { deletedPrincipals, batches, truncated: true }
 }
 
-/** `--now=<RFC3339>` を解釈する。test環境以外では受け付けない。 */
-export function resolveClock(appEnv: string, argv: readonly string[]): Clock {
-  const override = argv
-    .find((argument) => argument.startsWith('--now='))
-    ?.slice('--now='.length)
+/** このCLIが受け付ける唯一のオプション。 */
+const NOW_OPTION_PREFIX = '--now='
 
-  if (override === undefined) {
+/**
+ * `--now=<+09:00の日時>` を解釈する。test環境以外では受け付けない。
+ * argvは閉じた集合として検査し、未知のオプション・typo・位置引数・
+ * 重複・有効な`--now`との混在はすべて拒否する。黙って無視しない。
+ */
+export function resolveClock(appEnv: string, argv: readonly string[]): Clock {
+  const [argument, ...rest] = argv
+
+  if (argument === undefined) {
     return createSystemClock()
   }
 
-  if (appEnv !== 'test') {
-    throw new Error('--now はAPP_ENV=testでのみ指定できます。')
+  if (rest.length > 0) {
+    throw new AppError('VALIDATION_FAILED', {
+      publicMessage: '引数は --now=<日時> を1つだけ指定できます。',
+    })
   }
 
-  const instant = Temporal.Instant.from(override)
+  if (argument === '--now' || argument === NOW_OPTION_PREFIX) {
+    throw new AppError('VALIDATION_FAILED', {
+      publicMessage: '--now は --now=<日時> の形式で値を指定してください。',
+    })
+  }
+
+  if (!argument.startsWith(NOW_OPTION_PREFIX)) {
+    throw new AppError('VALIDATION_FAILED', {
+      publicMessage: '認識できない引数です。--now=<日時> だけを指定できます。',
+    })
+  }
+
+  if (appEnv !== 'test') {
+    throw new AppError('VALIDATION_FAILED', {
+      publicMessage: '--now はAPP_ENV=testでのみ指定できます。',
+    })
+  }
+
+  const instant = parseJstInstant(argument.slice(NOW_OPTION_PREFIX.length))
   return { now: () => instant }
+}
+
+/** 失敗時に記録してよい項目だけを持つ。メッセージ・cause・stackは含めない。 */
+export type PurgeFailureLog = {
+  job: string
+  level: 'error'
+  errorId: string
+  errorName: string
+}
+
+/**
+ * 失敗ログを組み立てる。原因の特定はerrorIdで運用側の記録と突き合わせる。
+ * 生のメッセージ・cause・stackはどの経路からも出さない。
+ */
+export function toPurgeFailureLog(error: unknown): PurgeFailureLog {
+  return {
+    job: JOB_NAME,
+    level: 'error',
+    errorId: uuidv7(),
+    errorName: toSafeErrorName(error),
+  }
 }
 
 async function main(): Promise<void> {
@@ -79,7 +129,7 @@ async function main(): Promise<void> {
       clock,
     })
 
-    console.log(JSON.stringify({ job: 'purge-expired-guests', ...summary }))
+    console.log(JSON.stringify({ job: JOB_NAME, ...summary }))
   } finally {
     await database.close()
   }
@@ -88,13 +138,7 @@ async function main(): Promise<void> {
 // Webプロセスのタイマーからは起動しない。cron等から独立したプロセスとして実行する。
 if (import.meta.main) {
   main().catch((error: unknown) => {
-    console.error(
-      JSON.stringify({
-        job: 'purge-expired-guests',
-        level: 'error',
-        message: error instanceof Error ? error.message : 'unknown error',
-      }),
-    )
+    console.error(JSON.stringify(toPurgeFailureLog(error)))
     process.exit(1)
   })
 }

@@ -16,7 +16,7 @@
     "build": "bun --filter '*' build",
     "db:generate": "bun --filter @tango/db db:generate",
     "db:migrate": "bun --filter @tango/db db:migrate",
-    "db:auth-schema": "bunx auth@1.6.25 generate --config apps/api/src/features/auth/better-auth.config.ts --output packages/db/src/schema/auth.generated.ts --yes",
+    "db:auth-schema": "bun run packages/db/scripts/generate-auth-schema.ts",
     "db:auth-schema:check": "bun --filter @tango/db db:auth-schema:check"
   },
   "devDependencies": {

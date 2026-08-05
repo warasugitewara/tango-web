@@ -1,11 +1,14 @@
 import { Temporal } from '@js-temporal/polyfill'
 import {
   createPrincipalRepository,
-  type DatabaseHandle,
   type PrincipalRepository,
   schema,
 } from '@tango/db'
-import { createTestDatabase, resetIdentityTables } from '@tango/db/test'
+import {
+  createTestDatabase,
+  resetIdentityTables,
+  type TestDatabaseHandle,
+} from '@tango/db/test'
 import { v7 as uuidv7 } from 'uuid'
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { createGuestService, createGuestTokenCodec } from './guest-service'
@@ -17,20 +20,29 @@ import {
 const TEST_PEPPER = 'identity-completion-test-pepper'
 const NOW = Temporal.Instant.from('2026-08-01T01:00:00Z')
 
-let handle: DatabaseHandle
+let handle: TestDatabaseHandle | undefined
 let repository: PrincipalRepository
 let service: IdentityCompletionService
 
 const codec = createGuestTokenCodec(TEST_PEPPER)
 
+function database(): TestDatabaseHandle {
+  if (handle === undefined) {
+    throw new Error('テストDBが初期化されていません。')
+  }
+  return handle
+}
+
 /** Better Authが作成する user 行だけを用意する。OAuthの往復はここでは扱わない。 */
 async function insertUser(userId: string): Promise<void> {
-  await handle.db.insert(schema.user).values({
-    id: userId,
-    name: 'テスト太郎',
-    email: `${userId}@example.com`,
-    emailVerified: true,
-  })
+  await database()
+    .db.insert(schema.user)
+    .values({
+      id: userId,
+      name: 'テスト太郎',
+      email: `${userId}@example.com`,
+      emailVerified: true,
+    })
 }
 
 async function startGuest(): Promise<string> {
@@ -49,16 +61,16 @@ async function startGuest(): Promise<string> {
 
 beforeAll(async () => {
   handle = await createTestDatabase()
-  repository = createPrincipalRepository(handle.db)
+  repository = createPrincipalRepository(database().db)
   service = createIdentityCompletionService({ repository, tokenCodec: codec })
 })
 
 afterAll(async () => {
-  await handle.close()
+  await handle?.close()
 })
 
 beforeEach(async () => {
-  await resetIdentityTables(handle.db)
+  await resetIdentityTables(database())
 })
 
 describe('IdentityCompletionService', () => {

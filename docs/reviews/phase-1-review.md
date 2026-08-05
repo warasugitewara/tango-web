@@ -1,180 +1,241 @@
 # Phase 1 レビューパケット: 基盤と識別
 
+- 更新日: 2026-08-05
 - 対象ブランチ: `feat/phase-1-foundation-identity`
-- 対象範囲: `main` (`314264f`) からブランチ HEAD まで
-- 計画: `docs/superpowers/plans/2026-08-01-tango-01-foundation-identity.md`
-- 仕様: `docs/superpowers/specs/2026-08-01-tango-spaced-repetition-design.md`
-- 未 push。Phase 2 の実装には未着手。
+- commit済み対象範囲: `main` (`314264f`) から HEAD (`b08ba5b`) まで（新規commitなし、HEADは2026-08-02から変わらず）
+- 未commit対象: Phase 1全体レビューのImportant 6件を解消する「最終ハードニング」Task 1〜4、および従来から未commitだったTask 8/9/10相当の変更を含む単一の論理境界（下表参照）。すべて1 commitへまとめる予定でcommit許可待ち
+- 計画: `docs/superpowers/plans/2026-08-01-tango-01-foundation-identity.md`（初回実装）、`docs/superpowers/plans/2026-08-02-tango-phase-1-final-hardening.md`（今回の最終ハードニング、Task 1〜5）
+- 仕様: `docs/superpowers/specs/2026-08-01-tango-spaced-repetition-design.md`（初回設計）、`docs/superpowers/specs/2026-08-02-tango-phase-1-final-hardening-design.md`（今回のハードニング設計、§1〜§4）
+- 状態: Phase 2未着手、pushなし、Codexが利用制限に到達したため今回のTask 1〜3独立レビューはClaudeが統括しタスクごとに別Sub-agentで実施（詳細は`docs/reviews/phase-1-codex-review.md`追記部）。未commit差分はcommit許可待ち
 
-レビュー観点 (計画 Task 6 Step 7): 仕様適合、識別処理の競合、Cookie とトークンの取り扱い、Better Auth 設定、マイグレーション、テスト証跡。
+レビュー観点（計画 Task 6 Step 7、および最終ハードニング計画 Task 5 Step 2）: 仕様適合、識別処理の競合、Cookieとトークンの取り扱い、Better Auth設定、migration、テスト証跡、env/maintenance jobのfail-closed境界。
 
-## 1. コミットマップ
+## 1. 対象範囲とcommit map
 
-| Task | コミット | メッセージ | 主な変更 |
+### commit済み
+
+| 区分 | commit | Git subject | 対応 |
 | --- | --- | --- | --- |
-| — | `e2837d3` | docs: Tango設計と段階別実装計画を追加 | 仕様と 4 フェーズ計画のベースライン |
-| 1 | `36efcda` | chore: Bunワークスペースと品質ゲートを初期化 | Bun ワークスペース、Biome、Vitest、TS strict、CI、`.env.example` |
-| 2 | `080e522` | feat: JST学習日と共通エラー契約を追加 | `learningDayOf` (04:00 JST 境界)、`AppError`、`Actor` / `ServiceContext` |
-| 3 | `9762d83` | feat: 認証主体とゲストセッションのDB基盤を追加 | Drizzle スキーマ、`0000_identity` マイグレーション、`PrincipalRepository`、テスト用 PostgreSQL、生成スキーマのドリフト検査 |
-| 4 | `ca593cf` | feat: 安全なゲスト認証と期限管理を追加 | `GuestService`、Turnstile 検証、`requestContext`、`onError`、`/api/guest/start`、`/api/session`、期限切れゲスト削除ジョブ |
-| 5 | `28d4831` | feat: GoogleとGitHubの正式アカウント連携を追加 | Better Auth 設定と `/api/auth/*` 委譲、`IdentityCompletionService`、`/api/identity/complete`、シークレットのファイル読み込み |
-| 6 | (本コミット) | test: 認証基盤の統合検証とレビュー資料を追加 | 通し統合テスト、CI の PostgreSQL サービス、本パケット、README |
+| 設計 | `e2837d3` | `docs: Tango設計と段階別実装計画を追加` | 仕様と4フェーズ計画の基準 |
+| Task 1 | `36efcda` | `chore: Bunワークスペースと品質ゲートを初期化` | Bun workspaceと品質gate |
+| Task 2 | `080e522` | `feat: JST学習日と共通エラー契約を追加` | JST学習日と共通契約 |
+| Task 3 | `9762d83` | `feat: 認証主体とゲストセッションのDB基盤を追加` | identity DB基盤 |
+| Task 4 | `ca593cf` | `feat: 安全なゲスト認証と期限管理を追加` | guest認証と期限管理 |
+| Task 5 | `28d4831` | `feat: GoogleとGitHubの正式アカウント連携を追加` | Better Authと正式account連携 |
+| Task 6 | `a70584f` | `test: 認証基盤の統合検証とレビュー資料を追加` | 統合検証と初回review packet |
+| P1-2 | `d12206a` | `fix: 一時障害でゲストCookieを削除しないようにする` | 一時障害時のゲストCookie保持 |
+| P1-3 | `b3702c0` | `fix: ゲスト期限の延長時にCookieも再発行する` | ゲスト期限延長時のCookie再発行 |
+| P1-1 | `463eb20` | `fix: 既存ゲストのCookieを上書きしないようにする` | 既存ゲストのCookie上書き防止 |
+| P1-4 | `b676fbb` | `fix: 識別完了で対象行をロックし並行昇格の上書きを防ぐ` | 識別完了の行ロックと並行昇格防止 |
+| P1-5 | `83cb66b` | `fix: 統合後に取り込み元のゲストprincipalを削除する` | 統合元guest principalのtransaction内削除 |
+| P1-6 | `4c3d3f9` | `fix: 期限切れゲストの掃除を単一トランザクションで行う` | purgeのtransaction化、`FOR UPDATE SKIP LOCKED`、削除条件再確認 |
+| P1-7 | `c774a8b` | `fix: テストDB接続先がテスト専用かを破壊操作の前に検証する` | 破壊操作前のテスト専用DB URL検証 |
+| P2-1 | `bc84fa0` | `fix: エラーログに生のstackとメッセージを残さない` | 生stack/messageを残さないエラーログ |
+| P2-8 | `7b8e644` | `fix: 壊れたボディを500ではなくVALIDATION_FAILEDへ正規化する` | 壊れたJSON・Content-Type・過大bodyの正規化 |
+| P2-2 | `0156756` | `fix: 本番のオリジンを固定しSecure Cookieの取りこぼしを防ぐ` | production origin固定とSecure Cookie強制 |
+| P2-7 | `a2f17b8` | `fix: ゲスト期限のレスポンスをJST形式で返す` | ゲスト期限の明示`+09:00`形式 |
+| P2-5 | `b08ba5b` | `fix: 識別完了の冪等性キーと応答契約を計画へ揃える` | UUIDv7冪等性キー、所有者検証、`actor`/`outcome`応答契約 |
 
-差分の再現:
+再現コマンド:
 
 ```powershell
 git log --oneline 314264f..HEAD
 git diff --stat 314264f..HEAD
 ```
 
-## 2. マイグレーション
+### 未commitの論理境界
 
-- 名称: `0000_identity` (`packages/db/migrations/0000_identity.sql`)
-- ジャーナル: `packages/db/migrations/meta/_journal.json` に 1 エントリのみ (`idx: 0`)
-- 空の DB から適用して作られるテーブル (9 個):
-  `account`, `audit_logs`, `guest_sessions`, `identity_merges`, `principals`, `session`, `user`, `user_settings`, `verification`
+未commit差分にcommit SHAは存在しない。存在しないSHAを捏造しない。2026-08-02時点でP2-3/P2-4/P2-6/P2-9/P3-1/P3-2/P3-3/Task 10として個別に記載していた論理境界は、いずれも一度もcommitされないまま今回の最終ハードニングTask 1〜4と同じ working tree 上で重ね書きされ、境界が実質的に一体化した。したがって本改訂では、2026-08-02〜08-05に実施した最終ハードニング計画のTask単位で論理境界を書き直す。全体をTask 5完了後に**単一の日本語Conventional Commit**（計画上の想定メッセージ: `fix: Phase 1レビュー指摘を一括解消する`）へまとめる予定であり、現時点ではその commit も存在しない。
 
-### 自前テーブル
+| 区分 | 状態 | 主な変更（対応する旧区分） |
+| --- | --- | --- |
+| Task 1 | **未commit（論理境界、`better-auth.ts`と`oauth-callback.integration.test.ts`のみ一部stage済み、残りunstaged/untracked）** | Better Auth `idToken`非永続化、safe logger、`(provider_id, account_id)`複合unique index、`0005_colorful_kingpin.sql`。旧P2-3・P2-4の一部を包含 |
+| Task 2 | **未commit（論理境界、unstaged/untracked）** | `identity_merges.source_guest_token_hash`によるmergeKey replayのsource binding、`0006_hot_gertrude_yorkes.sql` |
+| Task 3 | **未commit（論理境界、unstaged）** | `TestDatabaseHandle`のruntime brand化と`resetIdentityTables`のhandle限定。旧P3-2を包含 |
+| Task 4 | **未commit（論理境界、unstaged/untracked）** | `DATABASE_URL`のURL/protocol検証、purge CLIの閉じたargv検査、purge top-levelログの安全化。旧P3-1を包含 |
+| 計画外対応 | **未commit（論理境界、untracked）** | `toSafeErrorName`を`packages/shared/src/errors/safe-error-name.ts`へ一本化（詳細は8章の逸脱表） |
+| 旧P2-6/P3-3相当 | **未commit（論理境界、unstaged）** | `.env.example`とruntime schemaの11キー一致、`.gitignore`の限定ignoreは維持されたまま今回も未commit |
+| 旧P2-9相当 | **未commit（論理境界、unstaged/untracked）** | audit metadataのruntime/DB再帰・大小文字・秘密キー防御、`0003`/`0004`は今回も未commitのまま |
+| Task 5 | **未commit（論理境界、unstaged/untracked）** | 本レビューpacketと`phase-1-codex-review.md`追記、独立review実施記録 |
 
-| テーブル | 要点 |
+`git status --porcelain=v1 -uall` で2026-08-05に再確認した現在の構成:
+
+- stage済み（index）: `apps/api/src/app.ts`（M）、`apps/api/src/features/auth/better-auth.ts`（indexとworking treeの双方に差分あり=MM）、`apps/api/src/features/auth/oauth-callback.integration.test.ts`（indexはadd、working treeにも追加差分=AM）、`apps/api/src/features/auth/oauth-error-page.ts`（A）
+- working tree差分あり（tracked、unstaged）: 上記4件のうち`better-auth.ts`と`oauth-callback.integration.test.ts`を含め、`.env.example`、`.gitignore`、`apps/api/src/env.ts`／`env.test.ts`、`apps/api/src/features/auth/identity-completion-service.test.ts`、`identity-flow.integration.test.ts`、`provider-routes.test.ts`、`apps/api/src/jobs/purge-expired-guests.ts`、`apps/api/src/middleware/error-handler.ts`、`docs/reviews/phase-1-review.md`（本ファイル）、`package.json`、`packages/db/migrations/meta/_journal.json`、`packages/db/scripts/check-auth-schema.ts`、`packages/db/src/repositories/principal-repository.ts`／`.test.ts`、`packages/db/src/schema/audit.ts`、`auth.generated.ts`、`principals.ts`、`packages/db/src/test/database.ts`／`.test.ts`、`packages/shared/src/index.ts`
+- untracked: `apps/api/src/jobs/purge-expired-guests.test.ts`、`docs/reviews/phase-1-codex-review.md`、`docs/superpowers/plans/2026-08-02-tango-phase-1-final-hardening.md`、`docs/superpowers/specs/2026-08-02-tango-phase-1-final-hardening-design.md`、`packages/db/migrations/0002_hard_donald_blake.sql`〜`0006_hot_gertrude_yorkes.sql`とその`meta/`snapshot、`packages/db/scripts/auth-schema.ts`／`.test.ts`／`generate-auth-schema.ts`、`packages/db/src/schema/account-identity.test.ts`／`audit.test.ts`／`auth-instant-migrations.test.ts`、`packages/shared/src/errors/safe-error-name.ts`／`.test.ts`
+
+commit/push実行前に、この一覧と`.gitignore`を再度突き合わせ、`.superpowers/`と`.claude/settings.local.json`を混入させないことを最終確認する。
+
+## 2. migration
+
+実ファイルは`0000`〜`0006`の7本。`meta/_journal.json`は`idx: 0..6`の7 entryで、`0000_snapshot.json`から`0006_snapshot.json`までの`id` / `prevId`が連続している。`0000`〜`0004`は今回のハードニングで変更していない。
+
+| migration | 状態と目的 |
 | --- | --- |
-| `principals` | `id uuid` 主キー。`kind in ('guest','user')` と `(kind = 'user') = (user_id is not null)` を CHECK で強制。`user_id` は UNIQUE かつ `user(id)` へ `ON DELETE CASCADE`。 |
-| `guest_sessions` | `principal_id` UNIQUE (1 principal に 1 セッション)、`token_hash` UNIQUE。`expires_at` に索引。`principal_id` は CASCADE。生トークンは保存しない。 |
-| `identity_merges` | `merge_key` UNIQUE で冪等性を担保。`status in ('pending','completed','failed')`。`source_principal_id` は `ON DELETE SET NULL`、`target_principal_id` は CASCADE。 |
-| `user_settings` | `principal_id` 主キー。`desired_retention numeric(5,4)` 既定 `0.9000`、CHECK で `0.70..0.97`。 |
-| `audit_logs` | `metadata jsonb` に CHECK 制約 `not jsonb_exists_any(metadata, array['front','back','content','note','notes','text','answer','question'])` を置き、学習内容の混入を DB 層で拒否。`created_at` と `actor_principal_id` に索引。actor 参照は `ON DELETE SET NULL`。 |
+| `0000_identity.sql` | 9テーブル（`account`, `audit_logs`, `guest_sessions`, `identity_merges`, `principals`, `session`, `user`, `user_settings`, `verification`）を作成 |
+| `0001_identity_merge_key_uuid.sql` | `identity_merges.merge_key`を`text`から`uuid`へ前方変換 |
+| `0002_hard_donald_blake.sql` | Better Authのinstant 12列を`timestamp with time zone`へ前方変換。旧naive UTC壁時計の意味を`AT TIME ZONE 'UTC'`で保持 |
+| `0003_daily_cable.sql` | `audit_logs.metadata`の学習内容キーを全階層で拒否する再帰CHECKへ前方更新 |
+| `0004_cute_star_brand.sql` | 0003のCHECKを、ASCII大小文字を小文字化し`_`/`-`を除去する規則と秘密値キー集合へ前方更新 |
+| `0005_colorful_kingpin.sql`（新規） | `account`へ`(provider_id, account_id)`の複合unique indexを前方追加（Important I-3対応）。既存重複行の自動削除はしない。fail closedのため既存重複がある環境では適用が停止する |
+| `0006_hot_gertrude_yorkes.sql`（新規） | `identity_merges.source_guest_token_hash`（nullable `text`）を追加（Important I-2対応）。既存記録は推測backfillせずnullのまま |
 
-自前テーブルの時刻列はすべて `timestamp with time zone`。接続は `packages/db/src/client.ts` で `TimeZone = Asia/Tokyo` を固定する。
+Better Authの生成SoTは直接手編集しない。pinned `auth@1.6.25` CLIの出力へ決定的な生成後変換を適用し、`auth.generated.ts`の12列すべてを`withTimezone: true`にし、かつ`uniqueIndex(providerId, accountId)`を1件だけ挿入する。TIMESTAMPTZ対象が12列ちょうど、unique indexが1件ちょうどでなければfail closedする。`bun run db:auth-schema:check`はCLI生成結果＋変換結果との一致を検査する。
 
-### Better Auth 生成テーブル
+自前テーブルを含むすべてのinstant列も`TIMESTAMPTZ`であり、接続時は`TimeZone = Asia/Tokyo`を設定する。以前の「生成auth列はtimestamp without time zone」という差分は解消済み。
 
-`user` / `session` / `account` / `verification` は `packages/db/src/schema/auth.generated.ts` から生成され、手編集は禁止。`bun run db:auth-schema:check` が `auth@1.6.25` の再生成結果と 1 バイト単位で比較する。
+2026-08-05のfresh検証では、空DB（`tango_fresh_test`を新規作成）に対して`0000`〜`0006`をクリーンに適用できることと、既存の適用済みDBに対しても`bun run db:migrate`がexit 0で完了することの両方を確認した。既存provider重複や既存audit禁止行の自動削除・自動redactは行っていないため、本番適用前には`0005`/`0004`相当のread-only preflight（重複件数確認、禁止key含有行確認）を手動gateとして残す。
 
-**既知の差分**: 生成分の時刻列は `timestamp` (タイムゾーンなし) で、計画の「すべての instant は TIMESTAMPTZ」を満たさない (`session.expires_at` など)。生成物を手編集しない方針を優先した。要レビュー判断。
+### audit metadata防御
 
-## 3. 実行したコマンドと結果
+- runtime: `assertAuditMetadata`がobject/arrayを循環安全に再帰走査し、通常のDrizzle writeではcustom JSONB `toDriver`から必ず検証する。
+- DB: JSONPathで全階層object keyを検査し、raw SQL等のruntime迂回にもCHECKを適用する。
+- 共通規則: ASCII大小文字を同一視し、ASCIIの`_`と`-`だけを除去してから、キー全体を禁止集合と比較する。space、dot、非ASCIIは同一視しない。
+- 禁止集合: 学習内容キーに加え、token/session/cookie/password/secret/OAuth credential等の秘密値キーを一つのSoTで管理する。
+- 限界: 汎用denylistは無害な別名キーへの誤格納を完全には検知できない。Phase 2でproduction audit write eventを追加する前にevent別allowlist schemaを必須化する。
 
-すべて `main` からの分岐後の HEAD (Task 6 の変更を含む) で実行。ローカルは Windows 11 + Bun 1.3.14、DB は WSL2 Ubuntu の Docker 上の `postgres:18.4-bookworm` (`127.0.0.1:55432`)。
+## 3. fresh検証結果（2026-08-05）
 
-| コマンド | 結果 |
+Windows 11、Bun 1.3.14、専用PostgreSQL `127.0.0.1:55432`で実行した。
+
+| コマンド | fresh結果 |
 | --- | --- |
-| `bun install --frozen-lockfile` | exit 0 / `Checked 217 installs across 336 packages (no changes)` |
-| `bun run db:migrate` (既存 DB) | exit 0 / `migrations applied successfully` (適用済みのため差分なし) |
-| `bun run db:migrate` (空の検証用 DB) | exit 0 / 上記 9 テーブルを新規作成 |
-| `bun run check` | exit 0 / Biome 53 ファイル、typecheck 4 パッケージ、Vitest **9 ファイル 82 テスト全て pass** |
-| `bun run build` | exit 0 / api バンドル 765 modules 2.48 MB、web `dist/assets/index-BhTvGR6K.js` 190.47 kB (gzip 60.07 kB) |
-| `bun run db:auth-schema:check` | exit 0 / `auth.generated.ts は auth@1.6.25 の生成結果と一致します` |
+| `bun install --frozen-lockfile` | exit 0、217 installs / 336 packages、変更なし |
+| `bun run check` | exit 0、Biome **67 files**修正なし、4 workspace typecheck exit 0、Vitest **19 files / 220 tests pass** |
+| `bun run build` | exit 0、全workspace成功。API 769 modules / 2.49 MB、Web 190.47 kB（gzip 60.07 kB） |
+| `bun run db:auth-schema:check` | exit 0、`auth@1.6.25`生成結果とTIMESTAMPTZ変換・複合unique indexに一致 |
+| `bun run db:generate` | exit 0、`No schema changes, nothing to migrate` |
+| `bun run db:migrate` | exit 0。**空DB`tango_fresh_test`を新規作成して`0000`〜`0006`を適用しクリーンに成功**。既存の適用済みDBに対しても exit 0 |
 
-「空の検証用 DB」はテスト用インスタンス上に `tango_ci_verify` を作成して `0000_identity` を適用し、テーブル一覧を確認したうえで破棄した。既存のテスト DB は破壊していない。
+テスト一覧は`bunx vitest list`をファイル別に集計し、上記fresh runの総数と一致させた。
 
-### テスト内訳 (合計 82)
-
-| ファイル | 件数 |
-| --- | --- |
-| `apps/api/src/features/auth/provider-routes.test.ts` | 18 |
+| テストファイル | 件数 |
+| --- | ---: |
+| `packages/db/src/schema/audit.test.ts` | 29 |
+| `apps/api/src/jobs/purge-expired-guests.test.ts` | 24 |
+| `apps/api/src/features/auth/auth-routes.test.ts` | 23 |
+| `apps/api/src/features/auth/provider-routes.test.ts` | 22 |
+| `apps/api/src/env.test.ts` | 17 |
+| `packages/db/src/repositories/principal-repository.test.ts` | 16 |
 | `packages/shared/src/errors/app-error.test.ts` | 15 |
-| `apps/api/src/features/auth/auth-routes.test.ts` | 13 |
+| `packages/db/src/test/database.test.ts` | 12 |
 | `packages/shared/src/time/learning-day.test.ts` | 11 |
-| `apps/api/src/features/auth/guest-service.test.ts` | 8 |
+| `apps/api/src/features/auth/guest-service.test.ts` | 10 |
+| `packages/shared/src/errors/safe-error-name.test.ts` | 9 |
+| `apps/api/src/features/auth/identity-flow.integration.test.ts` | 8 |
+| `packages/db/scripts/auth-schema.test.ts` | 6 |
 | `apps/api/src/features/auth/identity-completion-service.test.ts` | 6 |
-| `packages/db/src/repositories/principal-repository.test.ts` | 6 |
-| `apps/api/src/features/auth/identity-flow.integration.test.ts` | 4 |
+| `apps/api/src/middleware/error-handler.test.ts` | 5 |
+| `packages/db/src/schema/auth-instant-migrations.test.ts` | 2 |
+| `packages/db/src/schema/account-identity.test.ts` | 2 |
+| `apps/api/src/features/auth/oauth-callback.integration.test.ts` | 2 |
 | `tests/config/workspace.test.ts` | 1 |
+| **合計** | **220** |
 
-実 DB を使うのは `principal-repository.test.ts`、`identity-completion-service.test.ts`、`identity-flow.integration.test.ts` の 3 ファイル。
+165件（2026-08-02時点）から220件への増加55件は、今回のTask 1〜4回帰（provider identity一意性、mergeKeyのsource binding、`TestDatabaseHandle`拒否matrix、env/purge argv fail-closed、`toSafeErrorName`単体test）と、それに伴う既存ファイルへのcase追加による。
 
-### 通し統合テストが押さえている経路
+実DBを使うテストは、repository/identity completion/identity flowに加え、OAuth callback、audit、auth instant migrationを含む。DB URLは接続前と`TRUNCATE`前に、PostgreSQL scheme、loopback host、`_test` suffix、非productionを検証することに加え、今回のTask 3で`TestDatabaseHandle`のruntime brand（module-private `unique symbol` + WeakMap identity）と`current_database()`一致も検証する。
 
-`apps/api/src/features/auth/identity-flow.integration.test.ts` は実 DB に対し HTTP 境界から通す。Better Auth と Turnstile のみ差し替える。
+## 4. OAuth確認
 
-1. ゲスト開始 → `/api/session` がゲストとして解決 → `promoted` で正式化 → 同一 `mergeKey` の再送が `existing` に収束 → principal ID が引き継がれる。
-2. ゲスト無しで `created` → 別ゲストを開始 → `merged` → 取り込み後のゲスト Cookie はログアウト後も再利用不能 (401) → principal ID は不変。
-3. Better Auth セッション無しの `/api/identity/complete` は 401 で、ゲスト Cookie を消さない。
-4. `principals` / `guest_sessions` / `identity_merges` / `audit_logs` の全文字列を連結しても生トークンは出現せず、HMAC ハッシュのみが存在する。
+### 自動境界検証
 
-### CI
+`oauth-callback.integration.test.ts`は、実Better Auth 1.6.25 callback、実PostgreSQL adapter、Google token endpoint mockを通し、既存GitHub利用者と同じemailのGoogle callbackが暗黙linkされず、`account_not_linked`が同一originの`/auth/error`へredirectされ、`ACCOUNT_NOT_LINKED`と日本語回復案内に写像されることを検証する。これは**自動provider mock境界テストであり、実OAuthではない**。
 
-`.github/workflows/ci.yml` は `postgres:18.4-bookworm` をサービスとして起動し、ヘルスチェック通過を待ってから、空の DB へマイグレーション適用 → 認証統合テスト → Better Auth スキーマ再生成比較 → `check` → `build` の順に実行する。`TZ` / `PGTZ` は `Asia/Tokyo` に揃えてローカルとの差を消してある。
+今回のTask 1（Step 1）で、同ファイルへ成功callback経路のテストを追加した。provider mock＋実PostgreSQL adapterを通し、正式session Cookieの`Secure; HttpOnly; SameSite=Lax; Path=/`（`Domain`なし）属性、DBに保存されたaccess/refresh tokenの暗号文がrawと異なること、`id_token`列がnullであることを検証する。これは`.superpowers/sdd/phase-1-codex-review/final-review.md`のMinor M-3（実際の成功OAuth callback/Cookie/token保存経路が自動テストされていない）の解消に相当するが、依然として**provider mockであり実OAuthプロバイダとの通信ではない**。
 
-**未検証**: この CI 変更は push していないため GitHub 上で実行されていない。ローカルでは各ステップ相当を個別に実行して成功を確認済み。
+### 実Google/GitHub OAuth 5シナリオ（未実施）
 
-## 4. 手動 OAuth 確認 (未実施)
-
-計画 Task 6 Step 4 の 5 シナリオは **未実施**。実在の Google / GitHub OAuth アプリと対話的なブラウザ操作が必要で、この作業環境では実行できなかった。
+実在providerの資格情報と対話ブラウザがないため、計画 Task 6 Step 4は未実施のまま。
 
 | # | シナリオ | 状態 |
 | --- | --- | --- |
-| 1 | 新規 Google ログインが `/auth/complete` に到達し正式 principal を作る | 未実施 |
-| 2 | ログイン済み Google ユーザーが GitHub を明示的に連携 | 未実施 |
-| 3 | Google が残る場合のみ GitHub 連携解除が成功 | 未実施 |
-| 4 | 同一メールの未連携プロバイダのサインインで日本語の連携案内が出る | 未実施 |
-| 5 | ゲストのデータ principal が昇格/統合され、成功後にのみゲスト Cookie が消える | 未実施 |
+| 1 | 新規Googleログインが`/auth/complete`へ到達し正式principalを作る | 未実施 |
+| 2 | Googleログイン済み利用者がGitHubを明示連携する | 未実施 |
+| 3 | Googleが残る場合だけGitHub連携解除が成功する | 未実施 |
+| 4 | same-email未連携providerのsign-inで日本語回復案内が出る | 未実施 |
+| 5 | ゲストprincipalが昇格/統合され、成功後だけゲストCookieが消える | 未実施 |
 
-代替の自動検証として押さえてある範囲:
+したがってP2-3の自動境界はPASSだが、リリース前の手動実OAuth確認は残る。
 
-- シナリオ 1・5 は `identity-flow.integration.test.ts` が HTTP 境界で等価な経路を検証している (Better Auth のセッション読み取りのみ差し替え)。
-- シナリオ 4 のエラー表現は `provider-routes.test.ts` が `ACCOUNT_NOT_LINKED` の日本語メッセージとして検証している。
-- シナリオ 2・3 の連携/解除そのものは Better Auth の `linkSocial` / `unlinkAccount` に委ねており、設定側 (`disableImplicitLinking: true`, `allowUnlinkingAll: false`, `freshAge: 600`) を `provider-routes.test.ts` が検証している。実際のプロバイダ往復は未検証。
+## 5. 修正後のセキュリティ・契約状態
 
-**リリース前に実機確認が必要**。
+### Important I-1〜I-6の解決根拠
 
-## 5. セキュリティ上重要な設定名
+2026-08-01の初回Codexレビュー（`docs/reviews/phase-1-codex-review.md`）はP1/P2/P3という番号体系を使っており、「Important I-1〜I-6」という番号はそこには存在しない。この番号は、2026-08-02にPhase 1全体worktree（初回実装＋Task 8/9/10相当の未commit差分）を対象に行った別の全体レビュー記録`.superpowers/sdd/phase-1-codex-review/final-review.md`（ローカル作業ファイル。`.superpowers/`は`.gitignore`対象でありcommit対象外）で初出する。今回の最終ハードニング計画・設計書（`docs/superpowers/plans/2026-08-02-tango-phase-1-final-hardening.md`、`docs/superpowers/specs/2026-08-02-tango-phase-1-final-hardening-design.md`）はこの6件を「Important 6件」として引き継ぎ、設計書§1〜§4として再整理した。本節はfinal-review.mdのI-1〜I-6番号と設計書の§区分の両方で対応付ける。commit対象に含まれないローカルファイルへの参照である点に留意する。
 
-値は一切リポジトリに存在しない。名前のみを記す。
+| Important | 指摘概要（要約） | 設計書区分 | 解決したTask / 根拠 |
+| --- | --- | --- | --- |
+| I-1 | `encryptOAuthTokens: true`を設定してもBetter Auth 1.6.25はcreate/update/link時の`idToken`をrawのままadapterへ渡し、暗号化されない | §1 | Task 1: `databaseHooks.account.create.before`/`update.before`で`idToken`を`null`へ置換し永続化しない。成功callback統合testでaccess/refresh tokenのciphertext非同一と`id_token is null`を検証。独立review: 初回Important 1件（同一provider update時のtoken assertionの弱さ）を検出しfix round再reviewでCritical/Important/Minor 0件のPASSに到達 |
+| I-2 | 記録済み`mergeKey`のreplay判定が`target userId`だけで、`identity_merges.source_principal_id`はmerge後のguest削除で`ON DELETE SET NULL`になるため、別の有効guest Cookieを伴う再送でそのguestデータを保護できないままCookieだけ消える | §2 | Task 2: `identity_merges.source_guest_token_hash`（`0006_hot_gertrude_yorkes.sql`）を追加し、`userId`と`source_guest_token_hash`の両方が一致する場合だけ`existing`を返す。不一致は`CONFLICT`でguest Cookieを保持。独立review: Important 1件（`dumpIdentityText`が新列を集約せず、統合テストが`promoted`経路のみを通っていた）を検出し修正、fix round再reviewでCritical/Important/Minor 0件のPASS |
+| I-3 | `account`テーブルに`(provider_id, account_id)`のDB一意制約がなく、同一provider identityを2ユーザーへ並行linkすると重複行が成立し得る | §1 | Task 1: 生成後変換へ`uniqueIndex(providerId, accountId)`を追加し、`0005_colorful_kingpin.sql`で前方migrationする。異なるuserからの並行insertで一方だけ成功するDB統合testを追加 |
+| I-4 | `resetIdentityTables(db)`がglobal `TEST_DATABASE_URL`は検証するが、実際にTRUNCATEする`Database`は呼出側が自由に渡せる契約になっており、安全なURL検証と破壊対象が結び付いていない | §3 | Task 3: `createTestDatabase()`だけが生成できるruntime brand付き`TestDatabaseHandle`を導入し、`resetIdentityTables()`はhandle全体だけを受け取る。brand（module-private `unique symbol` + WeakMap identity）→`_test`接尾辞→`select current_database()`一致の三段検査をTRUNCATE前に行う。独立review: Critical/Important/Minor 0件のPASS |
+| I-5 | `DATABASE_URL`は非空文字列としてしか検証されず不正入力がそのままログに出る、purge jobがtop-levelで`error.message`を生ログする、Better Authに custom loggerを設定していないため既定loggerがraw argsを`console.error`する | §1, §4 | Task 1（Better Auth custom logger: library由来のmessage/argsを捨て`{ component, level, errorId }`だけを記録）とTask 4（`DATABASE_URL`をURLとして解釈しprotocolが`postgres:`/`postgresql:`の場合だけ受理、エラーにはキー名だけを出す。purge top-level error logは生message・cause・stackを捨て`job`/`level`/`errorId`(uuidv7)/安全な`errorName`だけを記録）で解決。加えて計画外対応として`toSafeErrorName`を`packages/shared`へ一本化し、`error-handler.ts`と`purge-expired-guests.ts`の重複実装を解消した（8章の逸脱表を参照） |
+| I-6 | purge CLIのargv parserが`--now`だけをfilterし、それ以外の未知引数・typoを無条件でsystem clock扱いにする | §4 | Task 4: argv全体を閉じた集合として検査し、未知option、typo、位置引数、裸`--now`、空、重複、valid nowとの混在をすべて`VALIDATION_FAILED`で拒否する |
 
-### 環境変数 (`apps/api/src/env.ts` の Zod スキーマで検証)
+同final-review.mdはMinor M-1〜M-4も記録している。M-3（実際の成功OAuth callback/Cookie/token保存経路が自動テストされていない）はTask 1 Step 1で追加した成功callback統合testにより解消した（4章参照）。M-1（guest daily touchの非atomic更新）、M-2（test DB migration失敗時のconnection/promise後始末）、M-4（CI drift gateがBetter Auth生成schemaに限定され、domain schema全体のdrift検査がない）は今回のTask 1〜4のscope外であり、6章の「Phase 2以降へ残す事項」に引き続き記録する。
 
-| 名前 | 内容 |
-| --- | --- |
-| `APP_ENV` | `development` / `test` / `production` |
-| `APP_ORIGIN` | 信頼する唯一のオリジン。`https:` かどうかで Cookie の `Secure` を決める |
-| `DATABASE_URL` | 接続 URL。ログには決して出さない |
-| `GUEST_TOKEN_PEPPER_FILE` | ゲストトークン HMAC のペッパーを収めたファイルのパス |
-| `TURNSTILE_SECRET_FILE` | Cloudflare Turnstile のシークレットのファイルパス |
-| `BETTER_AUTH_SECRET_FILE` | Better Auth の署名・暗号化シークレットのファイルパス |
-| `GOOGLE_CLIENT_ID` | 公開値 |
-| `GOOGLE_CLIENT_SECRET_FILE` | Google クライアントシークレットのファイルパス |
-| `GITHUB_CLIENT_ID` | 公開値 |
-| `GITHUB_CLIENT_SECRET_FILE` | GitHub クライアントシークレットのファイルパス |
+### 環境変数
 
-秘密値は環境変数に直接置かず、必ずファイル経由で読む (`readSecretFile`)。読み取り失敗・空ファイルは日本語のエラーで即座に落ち、内容はログに出さない。
+runtime schemaと`.env.example`は次の11キーで完全一致する。
 
-### Cookie
+`APP_ENV`, `APP_ORIGIN`, `DATABASE_URL`, `GUEST_TOKEN_PEPPER_FILE`, `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_FILE`, `BETTER_AUTH_SECRET_FILE`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET_FILE`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET_FILE`
 
-- ゲスト: 名前 `tango_guest`、`HttpOnly`、`SameSite=Lax`、`Path=/`、`Domain` 属性なし (Host-only)、`Secure` は `APP_ORIGIN` が HTTPS のときのみ、`Max-Age` 90 日。
-- 正式セッション: Better Auth の `advanced.defaultCookieAttributes` で `httpOnly` / `sameSite: 'lax'` / `path: '/'` を指定し `domain` は付けない。`crossSubDomainCookies` は未設定。
+秘密値は環境変数へ直接置かず、`*_SECRET_FILE` / `GUEST_TOKEN_PEPPER_FILE`のファイルから読む。env検証失敗はキー名だけを報告し、値を出さない。以前の「`.env.example`未解決」は解消済み。
 
-### Better Auth の主要設定 (`apps/api/src/features/auth/better-auth.ts`)
+### origin・Cookie・Better Auth
 
-`basePath: '/api/auth'`、`trustedOrigins: [APP_ORIGIN]`、`emailAndPassword.enabled: false`、`socialProviders` は Google と GitHub のみ、`account.encryptOAuthTokens: true`、`account.storeStateStrategy: 'database'`、`accountLinking.disableImplicitLinking: true`、`allowUnlinkingAll: false`、`session.expiresIn` 30 日 / `updateAge` 1 日 / `freshAge` 600 秒、`user.deleteUser.enabled: false`、`telemetry.enabled: false`、`advanced.disableCSRFCheck: false`、`advanced.disableOriginCheck: false`、`plugins: []`。
+- productionは`APP_ORIGIN === 'https://tango.warasugi.com'`以外を起動前に拒否し、正式・ゲストCookieとも`Secure`を強制する。HTTPを許すのはローカルdevelopment/testだけ。
+- Cookieは`HttpOnly`, `SameSite=Lax`, `Path=/`, Host-only（`Domain`なし）。ゲストは90日、正式sessionは30日rolling、更新間隔1日、fresh age 600秒。
+- `basePath: '/api/auth'`, `trustedOrigins`は検証済み単一origin、Google/GitHubのみ、email/password無効、CSRF/origin check有効。
+- OAuth access/refresh tokenは引き続き暗号化される。今回のTask 1で`databaseHooks.account.create.before`/`update.before`が`idToken`を`null`へ置換するため、Better Auth 1.6.25が暗号化しないID tokenはそもそもDBへ永続化されない（Important I-1対応）。
+- Better Authのcustom loggerを設定し、libraryから渡されるmessage/argsを使わず`{ component: 'better-auth', level, errorId }`だけを構造化記録する（Important I-5の一部）。
+- 生成後変換で`account`テーブルへ`uniqueIndex(providerId, accountId)`を追加し、`0005_colorful_kingpin.sql`で前方migrationする。同一provider identityへの並行insertはDB制約で一方だけ成功する（Important I-3対応）。
+- 有効な既存ゲストで`/api/guest/start`を再実行しても新しいtoken/Cookieを発行しない。一時DB障害ではCookieを保持し、失効確定時だけ削除する。DB期限を延長した時だけ同じtokenのCookie期限も再発行する。
 
-### 監査ログ
+### error・request境界
 
-`audit_logs.metadata` は DB の CHECK 制約で学習内容らしきキー (`front`, `back`, `content`, `note`, `notes`, `text`, `answer`, `question`) を拒否する。`onError` はリクエスト ID・エラーコード・スタックのみを内部ログへ出し、Cookie とリクエストボディは出さない。
+- 未知例外の生stack/messageは記録しない。ログはrequest ID、内部error ID、安定code、status、method/path、安全な例外名・cause名・呼出位置だけに限定する。
+- Cookie、request body、接続URL、SQL、カード内容をレスポンス/ログへ出さない。
+- 壊れたJSON、Content-Type不正、過大bodyは日本語`VALIDATION_FAILED`へ正規化する。
+- 今回、例外から安全なクラス名だけを取り出すsanitizer`toSafeErrorName`を`packages/shared/src/errors/safe-error-name.ts`へ一本化し、`apps/api/src/middleware/error-handler.ts`と`apps/api/src/jobs/purge-expired-guests.ts`の両方が同じ実装をimportする（計画外対応、8章参照）。挙動（判定順・正規表現・64文字切り詰め・フォールバック文字列）は変更していない。
 
-## 6. 初回リリースの既知の除外事項
+### concurrency・identity・purge
 
-仕様で明示された除外 (Phase 1 で対応しないことが正しい項目):
+- 識別完了はguest session → source principal → target principalの順で`FOR UPDATE`し、lock後に有効性・kind・userIdを再確認する。昇格UPDATEにもguest条件を残す。
+- merge成功時はowned rows移送hook、merge記録、source principal削除を同一transactionで行う。Phase 1には移送対象のドメインrowがない。
+- merge keyはUUIDv7/DB `uuid`で、再送時も記録済みtargetのuserId一致を必須にする。APIは正式`actor`と`outcome`を返す。
+- 今回のTask 2で`identity_merges.source_guest_token_hash`（`0006_hot_gertrude_yorkes.sql`、nullable text）を追加し、記録済み`mergeKey`の再送は`target userId`と`source guest token hash`の両方が一致する場合だけ`existing`を返す。別guest、guest→なし、なし→guestの組み合わせはすべて`CONFLICT`とし、guest Cookieを削除しない（Important I-2対応）。
+- purgeは単一transactionで`FOR UPDATE SKIP LOCKED`を使い、削除時にも有効session不在を再確認する。
+- purgeの`--now`はtest modeの単一`--now=<RFC3339 +09:00>`だけを許可する。今回のTask 4でargv全体を閉じた集合として検査するよう強化し、裸・空・重複・他offset・未知option・位置引数・valid nowとの混在をすべて`VALIDATION_FAILED`で拒否する（Important I-6対応）。
 
-- 内蔵のスクレイピングと LLM 実行
-- Anki `.apkg` 互換、カスタムノートタイプ/テンプレート、穴埋め (cloze)
-- 画像・音声のアップロードと外部メディア埋め込み
-- オフライン学習、PWA 同期、複数端末のリアルタイム同期
-- FSRS パラメータの個人最適化、一括再スケジュール、非空アカウントへの学習履歴統合
-- メール/パスワード認証と Discord OAuth
+### 破壊的test helperの接続先binding（Task 3、Important I-4対応）
 
-Phase 1 時点で意図的に未実装のもの:
+- `createTestDatabase()`だけが生成できる非公開runtime brand付き`TestDatabaseHandle`を導入した。module-private `unique symbol`をrequired propertyとして持ち、module-private `WeakMap<object, string>`へfactoryが返したobject identityと検証済みDB名だけを登録する。接続URL・username・passwordはhandle property・エラーへ保持しない。
+- `resetIdentityTables()`はこのhandle全体だけを受け取り、TRUNCATE前にbrand（identity）→期待DB名の`_test`接尾辞→実接続先の`select current_database()`完全一致、の三段検査を行う。
+- `Reflect.apply`によるforeign object偽装、およびsymbol propertyだけをshallow copyした偽装ハンドルの両方を、実測でTRUNCATE前に固定エラーとして拒否することを確認した。
+- 通常のDB query用`.db`はfreezeしないため、既存テストの通常利用には影響しない。破壊操作前後の接続先はloopback host、`tango_test`（または`_test`接尾辞の一時DB）であることを確認済み。
 
-- ドメインテーブル (デッキ、カード、レビュー等) はまだ無い。統合時の移送は `moveOwnedDomainRows` を Phase 2 で埋める。
-- アカウント削除は Phase 4 で確認フローを備えるまで無効。
-- レート制限は Turnstile によるゲスト開始の抑止のみ。汎用のレート制限は後続フェーズ。
-- `apps/web` は雛形のみ。`/auth/complete` の画面実装は後続フェーズ。
+## 6. Phase 2以降へ残す事項
 
-## 7. Phase 2 が依存するインターフェース
+- Phase 2は未着手。デッキ、カード、レビュー等のドメインテーブルはまだない。
+- `moveOwnedDomainRows`はPhase 2で移送対象を追加する拡張点。ドメインwrite時の所有権再検証・lock protocolを守る。
+- production audit write経路はまだない。追加前にevent別allowlist schemaを実装する（denylistだけを安全境界にしない）。
+- `apps/web`は雛形で、`/auth/complete`等の製品画面は後続フェーズ。
+- アカウント削除はPhase 4のfresh OAuth確認フローまで無効。
+- 汎用rate limitは後続フェーズ。Phase 1はゲスト開始のTurnstileのみ。application CSRF、security headersと合わせてPhase 4のmandatory release gate。
+- 実Google/GitHub OAuth 5シナリオはリリース前に手動実施する（4章参照、未実施）。
+- Minor findings（`.superpowers/sdd/phase-1-codex-review/final-review.md`のM-1〜M-4のうちM-3以外）は今回未解決のままPhase 2開始を妨げない追跡事項として残す。
+  - M-1: guest daily touchが観測値・day境界をWHEREへ含まないCAS更新になっておらず、遅い並行requestが新しい値を上書きし得る（データ喪失ではなく軽微な有効期限短縮）。
+  - M-2: `createTestDatabase()`のmigration失敗時にconnection close・rejected promise cacheの後始末がなく、後続suiteの原因切り分けを悪化させ得る。
+  - M-4: CI drift gateは`bun run db:auth-schema:check`によるBetter Auth生成schemaのdrift検査に限定され、domain schema全体の「未生成migration差分なし」を検査するCI commandがない。
+  - M-3（成功OAuth callback/Cookie/token保存経路の自動test不足）はTask 1 Step 1で解消済み（4章参照）。
 
-これらは Phase 2 で変更せずに使える契約として固定する。
+初回リリースの仕様上の除外（Anki `.apkg`、cloze、メディア、PWA/オフライン同期、FSRS個人最適化、非空accountへの学習履歴restore、email/password、Discord OAuth等）も変更しない。
 
-### `Actor` / `ServiceContext` (`packages/shared/src/contracts/actor.ts`)
+## 7. Phase 2が依存するinterface
+
+### `Actor` / `ServiceContext`
 
 ```ts
 export type Actor =
@@ -188,89 +249,44 @@ export type ServiceContext = {
 }
 ```
 
-ドメインデータの所有者は常に `principalId` で一意に決まる。ゲストと正式利用者を型で区別しつつ、所有権の表現は 1 つに保つ。取得は `requireServiceContext(context)` 経由で、`now` を直接読まない。
+所有者は常に`principalId`で表す。`ServiceContext`は`requireServiceContext(context)`経由で取得する。
 
-### `DatabaseTransaction` (`packages/db/src/client.ts`)
+### DB / repository
 
-```ts
-export type Database = PostgresJsDatabase<DatabaseSchema>
-
-export type DatabaseTransaction = Parameters<
-  Parameters<Database['transaction']>[0]
->[0]
-```
-
-### `PrincipalRepository` (`packages/db/src/repositories/principal-repository.ts`)
-
-```ts
-export type IdentityCompletionOutcome = 'created' | 'promoted' | 'merged' | 'existing'
-
-export interface PrincipalRepository {
-  findByUserId(userId: string): Promise<PrincipalRecord | null>
-  findActiveGuestByTokenHash(tokenHash: string, now: Date): Promise<GuestSessionRecord | null>
-  createGuest(input: { tokenHash: string; now: Date; expiresAt: Date }): Promise<GuestSessionRecord>
-  completeIdentity(input: {
-    userId: string
-    guestTokenHash: string | null
-    mergeKey: string
-    now: Date
-  }): Promise<IdentityCompletionResult>
-  touchGuest(input: { sessionId: string; now: Date; expiresAt: Date }): Promise<void>
-  revokeGuest(sessionId: string, now: Date): Promise<void>
-  purgeExpiredGuests(input: { now: Date; limit: number }): Promise<PurgeExpiredGuestsResult>
-}
-```
-
-### Phase 2 の拡張点
+`DatabaseTransaction`はDrizzleの`Database['transaction']` callback引数から導出する。`PrincipalRepository`はguest作成・解決・touch・revoke・purgeと、`completeIdentity`の`created | promoted | merged | existing`を提供する。Phase 2は次のhookだけを同一transaction内で拡張する。
 
 ```ts
 export async function moveOwnedDomainRows(
   sourcePrincipalId: string,
   targetPrincipalId: string,
-  _tx: DatabaseTransaction,
+  tx: DatabaseTransaction,
 ): Promise<void>
 ```
 
-`completeIdentity` の統合分岐から同一トランザクション内で呼ばれる。Phase 2 でデッキ・カード等を追加する際は、この関数の中だけを拡張すれば統合の原子性が保たれる。Phase 1 では移送対象が存在しないため中身は空で、統合の事実は同トランザクションの `identity_merges` 行が記録する。
+## 8. 計画からの逸脱（最終実装）
 
-## 8. 計画からの逸脱
-
-| # | 内容 | 理由 |
+| # | 内容 | 理由 / 現在の扱い |
 | --- | --- | --- |
-| 1 | Better Auth CLI は `@better-auth/cli@1.6.25` ではなく素の `auth@1.6.25` | `@better-auth/cli` は npm に存在しない。`auth@1.6.25` の SLSA provenance を検証済み |
-| 2 | 生成された auth テーブルの時刻列が `timestamp` (タイムゾーンなし) | 生成物の手編集を禁じているため。自前テーブルは全て TIMESTAMPTZ |
-| 3 | `audit_logs` の CHECK 制約の秘匿キーをリテラル埋め込みに変更 | drizzle-kit がバインドパラメータを DDL へ展開できず `$1..$8` を出力したため |
-| 4 | `biome.json` から `**/*.generated.ts` と `packages/db/migrations` を除外 | Biome の整形が生成物のドリフト検査と衝突するため |
-| 5 | `better-auth.config.ts` を完全に環境変数非依存にした | スキーマ生成はオプションの構造だけで決まる。CLI 実行に接続情報やシークレットを要求しないため。実行時の入口は `better-auth.ts` の `createAuth` のみ |
-| 6 | `PrincipalRepository` に `purgeExpiredGuests` と `moveOwnedDomainRows` を追加 (計画のファイル一覧外) | 期限切れゲストの削除ジョブと、Phase 2 の統合移送のための拡張点。いずれも Phase 1 の要求から導かれる |
-| 7 | ルート `vitest.config.mts` を追加し `fileParallelism: false` | 実 DB を使うテストファイルが並列実行され、各々の `TRUNCATE` が互いを壊していた。単一テストインスタンスを共有する構成での根本対処 |
-| 8 | `@tango/db` に `./test` サブパスエクスポートと `dumpIdentityText` を追加 (計画のファイル一覧外) | 統合テストのヘルパを `apps/api` から使うため。生トークン非保存の検証に生 SQL が要るが、`apps/api` に `drizzle-orm` 依存を足さずに済ませた |
-| 9 | `README.md` は修正ではなく新規作成 | 元々存在しなかった |
-| 10 | **`.env.example` を更新できていない** | 権限設定によりこのファイルの読み書きが拒否される。下記の対応が必要 |
+| 1 | Better Auth CLIは`@better-auth/cli@1.6.25`ではなく`auth@1.6.25` | 前者の対象版がnpmに存在せず、後者が同版のCLIを提供するため |
+| 2 | Better Auth生成結果へ決定的なTIMESTAMPTZ変換を追加 | 生成物の直接編集禁止と仕様の全instant TIMESTAMPTZを両立。`0002`で既存DBも前方移行 |
+| 3 | audit CHECKを`0003`、独立review修正を`0004`として追加 | 適用済みmigrationを書き換えず、再帰・case・secret防御を前方更新するため |
+| 4 | `biome.json`で生成物とmigrationを除外 | formatterが生成driftやSQLを変更しないため |
+| 5 | `better-auth.config.ts`をschema生成用にenv非依存化 | 生成に接続情報・secretを要求しないため。runtime入口は`better-auth.ts`のみ |
+| 6 | repositoryに`purgeExpiredGuests` / `moveOwnedDomainRows`を追加 | maintenance commandとPhase 2の原子的移送hookに必要 |
+| 7 | root Vitestを`fileParallelism: false`に設定 | 単一実DBを共有するテスト同士の`TRUNCATE`競合を防ぐため |
+| 8 | `@tango/db`のtest subpathとDB検証helperを追加 | API統合テストと秘密値非保存検査を依存追加なしで行うため |
+| 9 | `README.md`を新規作成 | 元ファイルが存在しなかったため |
+| 10 | JSON body guard、OAuth error page、audit/auth migration検証を追加 | Codexレビューで判明したHTTP・OAuth・schema境界を回帰可能にするため |
+| 11 | `toSafeErrorName`（例外から安全なクラス名だけを取り出すログsanitizer）を`packages/shared/src/errors/safe-error-name.ts`へ単一のSoTとして統合し、`apps/api/src/middleware/error-handler.ts`と`apps/api/src/jobs/purge-expired-guests.ts`をimportへ置き換えた | 最終ハードニング計画のTask 4ファイル範囲（`env.ts`/`env.test.ts`/`purge-expired-guests.ts`/`.test.ts`）を超える対応。security-relevantなsanitizerを2箇所に重複実装すると片方だけ修正されログ漏洩経路が生まれるため、単体test（`packages/shared/src/errors/safe-error-name.test.ts`）を追加した上で一本化した。判定順・正規表現・64文字切り詰め・フォールバック文字列の挙動は変更していない |
 
-### 未解決: `.env.example`
+古い逸脱記載の「生成authのTIMESTAMPTZ差分」「`.env.example`未解決」「auditはtop-level CHECKのみ」は解消済み。
 
-Task 4 と Task 5 で追加した以下の環境変数が `.env.example` に反映されていない。手作業での追記が必要。
+## 9. 再レビュー時の残件
 
-```
-GUEST_TOKEN_PEPPER_FILE
-TURNSTILE_SECRET_FILE
-BETTER_AUTH_SECRET_FILE
-GOOGLE_CLIENT_ID
-GOOGLE_CLIENT_SECRET_FILE
-GITHUB_CLIENT_ID
-GITHUB_CLIENT_SECRET_FILE
-```
-
-### 運用上の注意
-
-WSL2 の VM はアイドルで停止し、テスト用 PostgreSQL コンテナも一緒に落ちる。テスト実行中は keep-alive プロセスを立てておく必要がある。
-
-## 9. レビューで特に見てほしい点
-
-1. **識別処理の競合**: `completeIdentity` の 4 分岐 (`created` / `promoted` / `merged` / `existing`) が単一トランザクションで、かつ `merge_key` の UNIQUE 制約だけで冪等性を担保できているか。同一ユーザーの並行コールバック、ゲスト作成時の `token_hash` 衝突リトライ (最大 5 回) の扱い。
-2. **`/api/auth/*` を `requestContext` より前に置いた判断**: 失効したゲスト Cookie がログインを妨げないようにするためだが、認証文脈を通さない経路を作ることの是非。
-3. **ゲスト Cookie の消去タイミング**: `/api/identity/complete` は取り込み成功後にのみ消し、失敗時は残す。一方 `requestContext` は解決失敗時に消す。この非対称が正しいか。
-4. **Better Auth 設定**: 上記 5 節の一覧が仕様の意図を満たしているか。特に `storeStateStrategy: 'database'` (追加テーブルは生じない)、`allowDifferentEmails: true` と `disableImplicitLinking: true` の組み合わせ。
-5. **生成 auth テーブルの `timestamp`**: TIMESTAMPTZ 方針との差をこのまま許容してよいか。
-6. **監査ログの秘匿**: DB の CHECK 制約だけで学習内容の混入を防ぐ設計の十分性。
+1. 実Google/GitHub OAuth 5シナリオは未実施。実資格情報と対話ブラウザが必要であり、provider mock境界テスト（Task 1の成功callback testを含む）を実OAuthの代替完了とは扱わない。
+2. 最終ハードニングTask 1〜4、および従来から未commitだったTask 8/9/10相当の変更を含め、本レビューpacket更新時点で**すべて未commit**。この後1件の日本語Conventional Commitへまとめる予定だが、まだcommitは実行していない。1章の「未commitの論理境界」表を参照。
+3. pushしていないため、GitHub CIは最新worktree差分では未実行。
+4. application CSRF、security headers、汎用rate limitはPhase 4のmandatory release gate。Phase 2のaudit writerを追加する前にevent別allowlist schemaを必須化する。
+5. Minor findings（guest touch CAS = M-1、test migration failure recovery = M-2、domain schema drift CI = M-4）はPhase 2開始を妨げない追跡事項として残る（6章参照）。
+6. 今回のレビュー体制の変更: 従来の親方レビュアーであったCodexが利用制限に到達したため、Task 1〜3の独立レビューはClaudeが統括し、タスクごとに別のSub-agentへ分離して実施した（Task 1: PASS。Task 2: Important 1件を検出し修正後にPASS。Task 3: PASS）。Task 4には同形式の独立レビュー記録はない。実OAuth以外の自動ゲート（`bun install`、`bun run check`、`bun run build`、`db:auth-schema:check`、`db:generate`、`db:migrate`）はすべて2026-08-05にfresh再実行済み。
+7. Phase 2には進まず、上記commitとGitHub CI実行後の再レビュー判定を待つ。

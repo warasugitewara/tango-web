@@ -2,9 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { v7 as uuidv7 } from 'uuid'
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
-import type { DatabaseHandle } from '../client'
 import * as schema from '../schema'
-import { createTestDatabase, resetIdentityTables } from '../test/database'
+import {
+  createTestDatabase,
+  resetIdentityTables,
+  type TestDatabaseHandle,
+} from '../test/database'
 import {
   createPrincipalRepository,
   IdentityMergeKeyConflictError,
@@ -23,33 +26,42 @@ function createGate(): { wait: Promise<void>; open: () => void } {
 }
 
 describe('PrincipalRepository', () => {
-  let handle: DatabaseHandle
+  let handle: TestDatabaseHandle | undefined
   let repository: PrincipalRepository
+
+  function database(): TestDatabaseHandle {
+    if (handle === undefined) {
+      throw new Error('テストDBが初期化されていません。')
+    }
+    return handle
+  }
 
   beforeAll(async () => {
     handle = await createTestDatabase()
-    repository = createPrincipalRepository(handle.db)
+    repository = createPrincipalRepository(database().db)
   })
 
   afterAll(async () => {
-    await handle.close()
+    await handle?.close()
   })
 
   beforeEach(async () => {
-    await resetIdentityTables(handle.db)
+    await resetIdentityTables(database())
   })
 
   /** Better Authが作る正式ユーザー行を模して1件挿入する。 */
   async function insertFormalUser(now: Date): Promise<string> {
     const id = randomUUID()
-    await handle.db.insert(schema.user).values({
-      id,
-      name: 'テストユーザー',
-      email: `${id}@example.test`,
-      emailVerified: true,
-      createdAt: now,
-      updatedAt: now,
-    })
+    await database()
+      .db.insert(schema.user)
+      .values({
+        id,
+        name: 'テストユーザー',
+        email: `${id}@example.test`,
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+      })
     return id
   }
 
@@ -141,8 +153,8 @@ describe('PrincipalRepository', () => {
     expect(created?.principal.id).not.toBe(guest.principalId)
 
     // 昇格したprincipalのuser_idが後勝ちで上書きされていない。
-    const [guestPrincipal] = await handle.db
-      .select()
+    const [guestPrincipal] = await database()
+      .db.select()
       .from(schema.principals)
       .where(eq(schema.principals.id, guest.principalId))
 
@@ -173,11 +185,12 @@ describe('PrincipalRepository', () => {
     })
     const input = guestInput(now)
     const guest = await repository.createGuest(input)
+    const mergeKey = uuidv7()
 
     const merged = await repository.completeIdentity({
       userId,
       guestTokenHash: input.tokenHash,
-      mergeKey: uuidv7(),
+      mergeKey,
       now,
     })
 
@@ -189,35 +202,38 @@ describe('PrincipalRepository', () => {
     ).toBeNull()
 
     // 取り込み元のゲストprincipalは残さない。
-    const remaining = await handle.db
-      .select({ id: schema.principals.id })
+    const remaining = await database()
+      .db.select({ id: schema.principals.id })
       .from(schema.principals)
     expect(remaining.map((row) => row.id)).toEqual([created.principal.id])
 
     // 従属する行もcascadeで消える。
-    const orphanSessions = await handle.db
-      .select({ id: schema.guestSessions.id })
+    const orphanSessions = await database()
+      .db.select({ id: schema.guestSessions.id })
       .from(schema.guestSessions)
       .where(eq(schema.guestSessions.principalId, guest.principalId))
     expect(orphanSessions).toHaveLength(0)
 
-    const orphanSettings = await handle.db
-      .select({ principalId: schema.userSettings.principalId })
+    const orphanSettings = await database()
+      .db.select({ principalId: schema.userSettings.principalId })
       .from(schema.userSettings)
       .where(eq(schema.userSettings.principalId, guest.principalId))
     expect(orphanSettings).toHaveLength(0)
 
     // 統合の事実そのものは identity_merges に残る。
-    const merges = await handle.db
-      .select({
+    const [merge] = await database()
+      .db.select({
         sourcePrincipalId: schema.identityMerges.sourcePrincipalId,
+        sourceGuestTokenHash: schema.identityMerges.sourceGuestTokenHash,
         targetPrincipalId: schema.identityMerges.targetPrincipalId,
       })
       .from(schema.identityMerges)
-      .where(eq(schema.identityMerges.targetPrincipalId, created.principal.id))
-    expect(merges).toHaveLength(2)
+      .where(eq(schema.identityMerges.mergeKey, mergeKey))
+
     // 取り込み元を削除するため source_principal_id は ON DELETE SET NULL でNULLになる。
-    expect(merges.every((row) => row.sourcePrincipalId === null)).toBe(true)
+    expect(merge?.sourcePrincipalId).toBeNull()
+    expect(merge?.sourceGuestTokenHash).toBe(input.tokenHash)
+    expect(merge?.targetPrincipalId).toBe(created.principal.id)
   })
 
   test('returns the existing principal when completion is retried', async () => {
@@ -241,6 +257,155 @@ describe('PrincipalRepository', () => {
     expect(first.outcome).toBe('created')
     expect(second.outcome).toBe('existing')
     expect(second.principal.id).toBe(first.principal.id)
+  })
+
+  test('returns existing for the same guest hash after promotion removes the active session', async () => {
+    const now = new Date()
+    const input = guestInput(now)
+    const guest = await repository.createGuest(input)
+    const userId = await insertFormalUser(now)
+    const mergeKey = uuidv7()
+
+    const first = await repository.completeIdentity({
+      userId,
+      guestTokenHash: input.tokenHash,
+      mergeKey,
+      now,
+    })
+    const replayed = await repository.completeIdentity({
+      userId,
+      guestTokenHash: input.tokenHash,
+      mergeKey,
+      now,
+    })
+
+    expect(first.outcome).toBe('promoted')
+    expect(replayed.outcome).toBe('existing')
+    expect(replayed.principal.id).toBe(guest.principalId)
+    expect(
+      await repository.findActiveGuestByTokenHash(input.tokenHash, now),
+    ).toBeNull()
+  })
+
+  test('rejects a different active guest for the same merge key without consuming it', async () => {
+    const now = new Date()
+    const firstInput = guestInput(now)
+    const secondInput = guestInput(now)
+    await repository.createGuest(firstInput)
+    const secondGuest = await repository.createGuest(secondInput)
+    const userId = await insertFormalUser(now)
+    const mergeKey = uuidv7()
+
+    await repository.completeIdentity({
+      userId,
+      guestTokenHash: firstInput.tokenHash,
+      mergeKey,
+      now,
+    })
+
+    await expect(
+      repository.completeIdentity({
+        userId,
+        guestTokenHash: secondInput.tokenHash,
+        mergeKey,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(IdentityMergeKeyConflictError)
+
+    const preserved = await repository.findActiveGuestByTokenHash(
+      secondInput.tokenHash,
+      now,
+    )
+    expect(preserved?.principalId).toBe(secondGuest.principalId)
+  })
+
+  test('rejects a missing guest hash when the merge key was bound to a guest', async () => {
+    const now = new Date()
+    const input = guestInput(now)
+    await repository.createGuest(input)
+    const userId = await insertFormalUser(now)
+    const mergeKey = uuidv7()
+
+    await repository.completeIdentity({
+      userId,
+      guestTokenHash: input.tokenHash,
+      mergeKey,
+      now,
+    })
+
+    await expect(
+      repository.completeIdentity({
+        userId,
+        guestTokenHash: null,
+        mergeKey,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(IdentityMergeKeyConflictError)
+  })
+
+  test('rejects a guest hash when the merge key was bound to no guest', async () => {
+    const now = new Date()
+    const input = guestInput(now)
+    const guest = await repository.createGuest(input)
+    const userId = await insertFormalUser(now)
+    const mergeKey = uuidv7()
+
+    await repository.completeIdentity({
+      userId,
+      guestTokenHash: null,
+      mergeKey,
+      now,
+    })
+
+    await expect(
+      repository.completeIdentity({
+        userId,
+        guestTokenHash: input.tokenHash,
+        mergeKey,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(IdentityMergeKeyConflictError)
+
+    const preserved = await repository.findActiveGuestByTokenHash(
+      input.tokenHash,
+      now,
+    )
+    expect(preserved?.principalId).toBe(guest.principalId)
+  })
+
+  test('binds an inactive guest hash even when no active source can be merged', async () => {
+    const now = new Date()
+    const expiredInput = guestInput(
+      new Date(now.getTime() - GUEST_LIFETIME_MS * 2),
+    )
+    await repository.createGuest(expiredInput)
+    const userId = await insertFormalUser(now)
+    const mergeKey = uuidv7()
+
+    const first = await repository.completeIdentity({
+      userId,
+      guestTokenHash: expiredInput.tokenHash,
+      mergeKey,
+      now,
+    })
+    const replayed = await repository.completeIdentity({
+      userId,
+      guestTokenHash: expiredInput.tokenHash,
+      mergeKey,
+      now,
+    })
+
+    expect(first.outcome).toBe('created')
+    expect(replayed.outcome).toBe('existing')
+
+    await expect(
+      repository.completeIdentity({
+        userId,
+        guestTokenHash: `hash-${randomUUID()}`,
+        mergeKey,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(IdentityMergeKeyConflictError)
   })
 
   test('refuses to hand another user the principal recorded for a merge key', async () => {
@@ -293,15 +458,17 @@ describe('PrincipalRepository', () => {
     const guest = await repository.createGuest(guestInput(now))
 
     await expect(
-      handle.db.insert(schema.guestSessions).values({
-        id: uuidv7(),
-        principalId: guest.principalId,
-        tokenHash: `hash-${randomUUID()}`,
-        lastSeenAt: now,
-        expiresAt: new Date(now.getTime() + GUEST_LIFETIME_MS),
-        createdAt: now,
-        updatedAt: now,
-      }),
+      database()
+        .db.insert(schema.guestSessions)
+        .values({
+          id: uuidv7(),
+          principalId: guest.principalId,
+          tokenHash: `hash-${randomUUID()}`,
+          lastSeenAt: now,
+          expiresAt: new Date(now.getTime() + GUEST_LIFETIME_MS),
+          createdAt: now,
+          updatedAt: now,
+        }),
     ).rejects.toThrow()
   })
 
@@ -330,8 +497,8 @@ describe('PrincipalRepository', () => {
     const result = await repository.purgeExpiredGuests({ now, limit: 10 })
 
     expect(result.deletedPrincipals).toBe(1)
-    const remaining = await handle.db
-      .select({ id: schema.principals.id })
+    const remaining = await database()
+      .db.select({ id: schema.principals.id })
       .from(schema.principals)
     expect(remaining.map((row) => row.id)).toEqual([liveGuest.principalId])
     expect(remaining.map((row) => row.id)).not.toContain(
@@ -349,7 +516,7 @@ describe('PrincipalRepository', () => {
     const locked = createGate()
     const release = createGate()
 
-    const extension = handle.db.transaction(async (tx) => {
+    const extension = database().db.transaction(async (tx) => {
       await tx
         .update(schema.guestSessions)
         .set({

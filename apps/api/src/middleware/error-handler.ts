@@ -1,12 +1,9 @@
-import { AppError, toApiErrorEnvelope } from '@tango/shared'
+import { AppError, toApiErrorEnvelope, toSafeErrorName } from '@tango/shared'
 import type { Context, ErrorHandler } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { v7 as uuidv7 } from 'uuid'
 import type { AppEnv } from './request-context'
-
-/** ログに載せる例外クラス名の最大長。 */
-const MAX_ERROR_NAME_LENGTH = 64
 
 /** cause連鎖をたどる深さの上限。連鎖が循環していても必ず止まる。 */
 const MAX_CAUSE_DEPTH = 5
@@ -19,21 +16,6 @@ const MAX_STACK_FRAMES = 10
  * `at ...:行:桁` の形だけを受け入れ、例外メッセージの行を弾く。
  */
 const STACK_FRAME_PATTERN = /^at\s.*:\d+:\d+\)?$/
-
-/**
- * 例外の種類だけを取り出す。メッセージは決して読まない。
- * 例外メッセージにはSQL文・接続URL・カード内容が入り得るため、
- * 分類に使える名前だけを、記号を含まない形に限って取り出す。
- */
-function toSafeErrorName(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return typeof error
-  }
-
-  return /^[\w$.]+$/.test(error.name)
-    ? error.name.slice(0, MAX_ERROR_NAME_LENGTH)
-    : 'Error'
-}
 
 /** cause連鎖を種類名だけの配列にする。メッセージは取り出さない。 */
 function toSafeCauseNames(error: unknown): string[] {

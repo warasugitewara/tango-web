@@ -114,6 +114,8 @@ export const identityMerges = pgTable(
       () => principals.id,
       { onDelete: 'set null' },
     ),
+    /** source principal削除後も再送元を照合できるHMAC-SHA-256 fingerprint。 */
+    sourceGuestTokenHash: text('source_guest_token_hash'),
     targetPrincipalId: uuid('target_principal_id')
       .notNull()
       .references(() => principals.id, { onDelete: 'cascade' }),

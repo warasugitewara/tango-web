@@ -8,3 +8,4 @@ test-results/
 !.env.example
 secrets/
 .superpowers/
+.claude/settings.local.json

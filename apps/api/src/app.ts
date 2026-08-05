@@ -3,6 +3,7 @@ import type { ActorResolver } from './features/auth/actor-resolver'
 import { createAuthRoutes } from './features/auth/auth-routes'
 import type { Clock, GuestService } from './features/auth/guest-service'
 import type { IdentityCompletionService } from './features/auth/identity-completion-service'
+import { createOAuthErrorRoutes } from './features/auth/oauth-error-page'
 import { errorHandler } from './middleware/error-handler'
 import { jsonBodyGuard } from './middleware/json-body-guard'
 import {
@@ -27,6 +28,8 @@ export function createApp(deps: AppDependencies) {
 
   app.onError(errorHandler())
   app.use('*', requestId())
+
+  app.route('/', createOAuthErrorRoutes())
 
   // Better Authは自前の文脈解決より先に置く。
   // 失効したゲストCookieが残っていてもログインを妨げないようにするため。

@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { drizzleAdapter } from '@better-auth/drizzle-adapter'
 import type { Database } from '@tango/db'
 import { type BetterAuthOptions, betterAuth } from 'better-auth'
+import { OAUTH_ERROR_PATH } from './oauth-error-page'
 
 /** 正式セッションの有効期間。アクセスのたびにローリング更新する。 */
 export const FORMAL_SESSION_EXPIRES_IN_SECONDS = 60 * 60 * 24 * 30
@@ -16,6 +18,51 @@ export type SocialCredentials = {
   clientSecret: string
 }
 
+export type BetterAuthLogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+export type BetterAuthLogEntry = Readonly<{
+  component: 'better-auth'
+  level: BetterAuthLogLevel
+  errorId: string
+}>
+
+export type BetterAuthLogSink = (entry: BetterAuthLogEntry) => void
+
+function writeBetterAuthLogToConsole(entry: BetterAuthLogEntry): void {
+  const serialized = JSON.stringify(entry)
+
+  if (entry.level === 'error') {
+    console.error(serialized)
+    return
+  }
+  if (entry.level === 'warn') {
+    console.warn(serialized)
+    return
+  }
+  console.info(serialized)
+}
+
+function createSafeBetterAuthLogger(sink: BetterAuthLogSink) {
+  return {
+    level: 'warn',
+    log(
+      level: BetterAuthLogLevel,
+      _message: string,
+      ..._rawArguments: unknown[]
+    ): void {
+      try {
+        sink({
+          component: 'better-auth',
+          level,
+          errorId: randomUUID(),
+        })
+      } catch {
+        // logger障害で認証処理をmaskせず、raw入力をfallback先へ再送しない。
+      }
+    },
+  } as const
+}
+
 export type BetterAuthInput = {
   db: Database
   /** 検証済みの単一オリジン。ここ以外は信頼しない。 */
@@ -24,12 +71,14 @@ export type BetterAuthInput = {
   google: SocialCredentials
   github: SocialCredentials
   useSecureCookies: boolean
+  /** Better Auth由来のraw message/argsを受け取らない構造化log境界。 */
+  authLogSink?: BetterAuthLogSink
 }
 
 /**
  * Better Authの設定を組み立てる。
  * 匿名/ゲスト系のベータプラグインは読み込まず、ゲストは自前のprincipalで扱う。
- * OAuthトークンの暗号化はBetter Auth側のsecretに委ね、独自の暗号化層は重ねない。
+ * access/refresh tokenの暗号化はBetter Auth側へ委ね、ID tokenは保存しない。
  */
 export function createBetterAuthOptions(input: BetterAuthInput) {
   const cookieAttributes = {
@@ -46,6 +95,9 @@ export function createBetterAuthOptions(input: BetterAuthInput) {
     database: drizzleAdapter(input.db, { provider: 'pg' }),
     trustedOrigins: [input.appOrigin],
     plugins: [],
+    logger: createSafeBetterAuthLogger(
+      input.authLogSink ?? writeBetterAuthLogToConsole,
+    ),
     emailAndPassword: { enabled: false },
     socialProviders: {
       google: {
@@ -68,6 +120,20 @@ export function createBetterAuthOptions(input: BetterAuthInput) {
         allowUnlinkingAll: false,
       },
     },
+    databaseHooks: {
+      account: {
+        create: {
+          async before(account) {
+            return { data: { ...account, idToken: null } }
+          },
+        },
+        update: {
+          async before(account) {
+            return { data: { ...account, idToken: null } }
+          },
+        },
+      },
+    },
     session: {
       expiresIn: FORMAL_SESSION_EXPIRES_IN_SECONDS,
       updateAge: FORMAL_SESSION_UPDATE_AGE_SECONDS,
@@ -77,6 +143,10 @@ export function createBetterAuthOptions(input: BetterAuthInput) {
     user: { deleteUser: { enabled: false } },
     // 外部への利用状況送信は行わない。
     telemetry: { enabled: false },
+    onAPIError: {
+      // OAuth callbackのerror queryを、アプリ側の安定コードと日本語案内へ写像する。
+      errorURL: new URL(OAUTH_ERROR_PATH, input.appOrigin).toString(),
+    },
     advanced: {
       disableCSRFCheck: false,
       disableOriginCheck: false,

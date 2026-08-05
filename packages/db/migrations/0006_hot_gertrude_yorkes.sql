@@ -1,0 +1,1 @@
+ALTER TABLE "identity_merges" ADD COLUMN "source_guest_token_hash" text;

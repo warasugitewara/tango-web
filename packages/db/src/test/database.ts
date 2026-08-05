@@ -29,6 +29,20 @@ const ALLOWED_PROTOCOLS: ReadonlySet<string> = new Set([
   'postgresql:',
 ])
 
+const TEST_DATABASE_HANDLE_BRAND: unique symbol = Symbol('TestDatabaseHandle')
+
+const RESET_SAFETY_ERROR =
+  'テストデータベースの安全性を確認できないため、リセットを中止しました。'
+
+export type TestDatabaseHandle = Readonly<
+  DatabaseHandle & {
+    readonly [TEST_DATABASE_HANDLE_BRAND]: true
+  }
+>
+
+/** factoryが返したhandle identityと、検証済みDB名だけを対応付ける。 */
+const registeredTestDatabases = new WeakMap<object, string>()
+
 /**
  * 接続先がテスト専用インスタンスであることを確認する。
  * このモジュールは全テーブルをTRUNCATE CASCADEするため、
@@ -38,7 +52,7 @@ const ALLOWED_PROTOCOLS: ReadonlySet<string> = new Set([
  * エラーメッセージにはホスト名とデータベース名だけを載せ、
  * 接続URLと認証情報は決して含めない。
  */
-export function assertTestDatabaseUrl(rawUrl: string): void {
+function validateTestDatabaseUrl(rawUrl: string): string {
   let url: URL
   try {
     url = new URL(rawUrl)
@@ -73,6 +87,12 @@ export function assertTestDatabaseUrl(rawUrl: string): void {
       'NODE_ENV=production ではテスト用データベースヘルパを実行できません。',
     )
   }
+
+  return database
+}
+
+export function assertTestDatabaseUrl(rawUrl: string): void {
+  validateTestDatabaseUrl(rawUrl)
 }
 
 export const TEST_DATABASE_URL =
@@ -105,15 +125,22 @@ let migrationPromise: Promise<void> | null = null
  * テストDBへ接続し、プロセス内で一度だけマイグレーションを適用する。
  * 接続する前に、接続先がテスト専用インスタンスであることを必ず確認する。
  */
-export async function createTestDatabase(): Promise<DatabaseHandle> {
-  assertTestDatabaseUrl(TEST_DATABASE_URL)
+export async function createTestDatabase(): Promise<TestDatabaseHandle> {
+  const expectedDatabaseName = validateTestDatabaseUrl(TEST_DATABASE_URL)
 
-  const handle = createDatabase(TEST_DATABASE_URL, { max: 5 })
+  const databaseHandle = createDatabase(TEST_DATABASE_URL, { max: 5 })
 
-  migrationPromise ??= migrate(handle.db, {
+  migrationPromise ??= migrate(databaseHandle.db, {
     migrationsFolder: MIGRATIONS_FOLDER,
   })
   await migrationPromise
+
+  const handle: TestDatabaseHandle = Object.freeze({
+    db: databaseHandle.db,
+    close: databaseHandle.close,
+    [TEST_DATABASE_HANDLE_BRAND]: true,
+  })
+  registeredTestDatabases.set(handle, expectedDatabaseName)
 
   return handle
 }
@@ -130,7 +157,7 @@ export async function dumpIdentityText(db: Database): Promise<string> {
       union all
       select id || ' ' || token_hash from guest_sessions
       union all
-      select id || ' ' || merge_key from identity_merges
+      select id || ' ' || merge_key || ' ' || coalesce(source_guest_token_hash, '') from identity_merges
       union all
       select id || ' ' || event_type || ' ' || metadata::text from audit_logs
     ) as identity_rows
@@ -143,11 +170,38 @@ export async function dumpIdentityText(db: Database): Promise<string> {
  * 識別まわりの全テーブルを空にする。テストごとの独立性を担保する。
  * 破壊的な操作なので、ここでも接続先がテスト専用かを再確認する。
  */
-export async function resetIdentityTables(db: Database): Promise<void> {
-  assertTestDatabaseUrl(TEST_DATABASE_URL)
+export async function resetIdentityTables(
+  handle: TestDatabaseHandle,
+): Promise<void> {
+  const expectedDatabaseName =
+    typeof handle === 'object' && handle !== null
+      ? registeredTestDatabases.get(handle)
+      : undefined
+
+  if (
+    expectedDatabaseName === undefined ||
+    handle[TEST_DATABASE_HANDLE_BRAND] !== true ||
+    !expectedDatabaseName.endsWith(REQUIRED_DATABASE_SUFFIX)
+  ) {
+    throw new Error(RESET_SAFETY_ERROR)
+  }
+
+  let currentDatabase: string | undefined
+  try {
+    const rows = await handle.db.execute<{ currentDatabase: string }>(sql`
+      select current_database() as "currentDatabase"
+    `)
+    currentDatabase = rows[0]?.currentDatabase
+  } catch {
+    throw new Error(RESET_SAFETY_ERROR)
+  }
+
+  if (currentDatabase !== expectedDatabaseName) {
+    throw new Error(RESET_SAFETY_ERROR)
+  }
 
   const targets = RESETTABLE_TABLES.map((table) => `"${table}"`).join(', ')
-  await db.execute(
+  await handle.db.execute(
     sql.raw(`truncate table ${targets} restart identity cascade`),
   )
 }

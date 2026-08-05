@@ -73,13 +73,13 @@ export interface PrincipalRepository {
 }
 
 /**
- * 記録済みの冪等性キーが別ユーザーのprincipalを指していた。
- * 鍵を再利用・詐称しても他人の学習データへ到達できないよう、
+ * 記録済みの冪等性キーが別ユーザーまたは別sourceを指していた。
+ * 鍵を再利用・詐称しても他人の学習データや別guestへ到達できないよう、
  * 完了処理をここで打ち切る。
  */
 export class IdentityMergeKeyConflictError extends Error {
   constructor() {
-    super('この冪等性キーは別のユーザーに割り当て済みです。')
+    super('この冪等性キーは別の入力に割り当て済みです。')
     this.name = 'IdentityMergeKeyConflictError'
   }
 }
@@ -387,16 +387,17 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
               recordedMerge.targetPrincipalId,
             )
 
-            if (principal !== null) {
-              // 記録済みの結果を返す前に、そのprincipalが本人のものか確かめる。
-              // 確かめないと、他人の冪等性キーを送るだけで
-              // 相手のprincipalを受け取れてしまう。
-              if (principal.userId !== userId) {
-                throw new IdentityMergeKeyConflictError()
-              }
-
-              return { principal, outcome: 'existing' }
+            // 記録済みの結果を返す前に、target userと入力source hashを
+            // 完全一致で照合する。nullとnon-nullも別sourceとして扱う。
+            if (
+              principal === null ||
+              principal.userId !== userId ||
+              recordedMerge.sourceGuestTokenHash !== guestTokenHash
+            ) {
+              throw new IdentityMergeKeyConflictError()
             }
+
+            return { principal, outcome: 'existing' }
           }
 
           // 2. 対象行を決まった順序でロックする。
@@ -419,6 +420,7 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
               id: uuidv7(),
               mergeKey,
               sourcePrincipalId,
+              sourceGuestTokenHash: guestTokenHash,
               targetPrincipalId,
               status: 'completed',
               createdAt: now,

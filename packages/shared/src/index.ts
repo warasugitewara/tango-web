@@ -7,6 +7,7 @@ export {
   type FieldErrors,
   toApiErrorEnvelope,
 } from './errors/app-error'
+export { toSafeErrorName } from './errors/safe-error-name'
 export {
   formatJst,
   LEARNING_DAY_START_HOUR,

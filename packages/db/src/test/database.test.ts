@@ -1,9 +1,64 @@
-import { describe, expect, test } from 'vitest'
-import { assertTestDatabaseUrl } from './database'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  expectTypeOf,
+  test,
+  vi,
+} from 'vitest'
+import type { Database, DatabaseHandle } from '../client'
+import {
+  assertTestDatabaseUrl,
+  createTestDatabase,
+  resetIdentityTables,
+  type TestDatabaseHandle,
+} from './database'
 
 /** 誤設定を検知するためのサンプル。パスワード部分が漏れないことも確認する。 */
 const PRODUCTION_LIKE_URL =
   'postgres://tango:s3cret-production-password@db.example.com:5432/tango'
+
+const RESET_SAFETY_ERROR =
+  'テストデータベースの安全性を確認できないため、リセットを中止しました。'
+
+let handle: TestDatabaseHandle | undefined
+
+function database(): TestDatabaseHandle {
+  if (!handle) {
+    throw new Error('テストデータベースが初期化されていません。')
+  }
+
+  return handle
+}
+
+async function expectResetSafetyError(operation: Promise<void>): Promise<void> {
+  let caught: unknown
+  try {
+    await operation
+  } catch (error) {
+    caught = error
+  }
+
+  expect(caught).toBeInstanceOf(Error)
+  if (!(caught instanceof Error)) {
+    return
+  }
+  expect(caught.message).toBe(RESET_SAFETY_ERROR)
+}
+
+beforeAll(async () => {
+  handle = await createTestDatabase()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+afterAll(async () => {
+  await handle?.close()
+})
 
 describe('assertTestDatabaseUrl', () => {
   test('accepts loopback connections to a _test database', () => {
@@ -59,5 +114,63 @@ describe('assertTestDatabaseUrl', () => {
     expect(() => assertTestDatabaseUrl('tango_test')).toThrow(
       /URLとして解釈できません/,
     )
+  })
+})
+
+describe('test database handle', () => {
+  test('is nominally distinct from arbitrary database handles', () => {
+    expectTypeOf<TestDatabaseHandle>().toExtend<DatabaseHandle>()
+    expectTypeOf<DatabaseHandle>().not.toExtend<TestDatabaseHandle>()
+    expectTypeOf<Database>().not.toExtend<TestDatabaseHandle>()
+  })
+
+  test('is frozen after creation', () => {
+    expect(Object.isFrozen(database())).toBe(true)
+  })
+
+  test('rejects an arbitrary database handle before executing SQL', async () => {
+    const executeSpy = vi.spyOn(database().db, 'execute')
+    const foreignHandle: DatabaseHandle = {
+      db: database().db,
+      close: database().close,
+    }
+
+    await expectResetSafetyError(
+      Reflect.apply(resetIdentityTables, undefined, [foreignHandle]),
+    )
+    expect(executeSpy).not.toHaveBeenCalled()
+  })
+
+  test('rejects a property copy of a registered handle before executing SQL', async () => {
+    const executeSpy = vi.spyOn(database().db, 'execute')
+    const copiedHandle = { ...database() }
+
+    await expectResetSafetyError(
+      Reflect.apply(resetIdentityTables, undefined, [copiedHandle]),
+    )
+    expect(executeSpy).not.toHaveBeenCalled()
+  })
+
+  test('rejects a current database mismatch before truncate', async () => {
+    const mismatchedRows = Object.assign(
+      [{ currentDatabase: 'production_like' }],
+      {
+        columns: [],
+        count: 1,
+        command: 'SELECT',
+        statement: { name: '', string: '', types: [], columns: [] },
+        state: { status: 'idle', pid: 0, secret: 0 },
+      },
+    )
+    const executeSpy = vi
+      .spyOn(database().db, 'execute')
+      .mockResolvedValue(mismatchedRows)
+
+    await expectResetSafetyError(resetIdentityTables(database()))
+    expect(executeSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('resets a registered handle after verifying the current database', async () => {
+    await expect(resetIdentityTables(database())).resolves.toBeUndefined()
   })
 })
