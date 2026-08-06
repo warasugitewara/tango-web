@@ -144,19 +144,45 @@ Windows 11、Bun 1.3.14、専用PostgreSQL `127.0.0.1:55432`で実行した。
 
 今回のTask 1（Step 1）で、同ファイルへ成功callback経路のテストを追加した。provider mock＋実PostgreSQL adapterを通し、正式session Cookieの`Secure; HttpOnly; SameSite=Lax; Path=/`（`Domain`なし）属性、DBに保存されたaccess/refresh tokenの暗号文がrawと異なること、`id_token`列がnullであることを検証する。これは`.superpowers/sdd/phase-1-codex-review/final-review.md`のMinor M-3（実際の成功OAuth callback/Cookie/token保存経路が自動テストされていない）の解消に相当するが、依然として**provider mockであり実OAuthプロバイダとの通信ではない**。
 
-### 実Google/GitHub OAuth 5シナリオ（未実施）
+### 実Google OAuth（2026-08-05に一部実施）
 
-実在providerの資格情報と対話ブラウザがないため、計画 Task 6 Step 4は未実施のまま。
+2026-08-05に、実在のGoogle OAuthクライアントと実ブラウザで手動実施した。実施環境は`http://localhost:3000`、`APP_ENV=development`、dev DB `tango_dev`（`0000`〜`0006`適用済み）。Turnstileは公式の常時成功テストキーを使った。GitHubのOAuthアプリは未作成のため、GitHubが必要なシナリオ2・3・4は未実施のまま。
 
 | # | シナリオ | 状態 |
 | --- | --- | --- |
-| 1 | 新規Googleログインが`/auth/complete`へ到達し正式principalを作る | 未実施 |
-| 2 | Googleログイン済み利用者がGitHubを明示連携する | 未実施 |
-| 3 | Googleが残る場合だけGitHub連携解除が成功する | 未実施 |
-| 4 | same-email未連携providerのsign-inで日本語回復案内が出る | 未実施 |
-| 5 | ゲストprincipalが昇格/統合され、成功後だけゲストCookieが消える | 未実施 |
+| 1 | 新規Googleログインが`/auth/complete`へ到達し正式principalを作る | **PASS** |
+| 2 | Googleログイン済み利用者がGitHubを明示連携する | 未実施（GitHub OAuthアプリ未作成） |
+| 3 | Googleが残る場合だけGitHub連携解除が成功する | 未実施（GitHub OAuthアプリ未作成） |
+| 4 | same-email未連携providerのsign-inで日本語回復案内が出る | 未実施（GitHub OAuthアプリ未作成） |
+| 5 | ゲストprincipalが昇格/統合され、成功後だけゲストCookieが消える | **統合(`merged`)はPASS。昇格(`promoted`)は未実施** |
 
-したがってP2-3の自動境界はPASSだが、リリース前の手動実OAuth確認は残る。
+#### 実施方法と、そこから確定した契約
+
+`apps/web`が雛形で`/auth/complete`と操作UIが存在しないため、リポジトリを一切変更せず、スクラッチパッドに置いたローカル中継（3000→3001へ転送し、同一オリジンで検証用ページを配信する）からサインイン開始と`POST /api/identity/complete`を実行した。中継はリクエストとレスポンスのstatus・Location・Set-Cookie名だけを記録し、commit対象には含まない。
+
+この過程で、Better Auth 1.6.25は`storeStateStrategy: 'database'`であっても、sign-in応答で署名済み`state` Cookieを発行し、callbackで`state`クエリと突き合わせることを実装（`better-auth/dist/state.mjs`のstate cookie検証）で確認した。ブラウザ外（`curl`やサーバ側`fetch`）からサインインを開始するとこのCookieが利用者側に存在せず、`state_security_mismatch`が`state_mismatch`へ読み替えられて`/auth/error`へ落ちる。**フロントエンドは必ずブラウザからサインインを開始しなければならない**という契約であり、実装の欠陥ではない。Phase 2以降の画面実装時の前提として記録する。
+
+#### シナリオ1の実測
+
+- 応答: `200`、`{ "actor": { "kind": "user", "principalId": "<UUIDv7>", "userId": "<Better Auth user id>" }, "outcome": "created" }`
+- callbackは`302 → /auth/complete`で、`better-auth.session_token`を発行し`better-auth.state`を失効させた
+- DB `account`: **`id_token` は NULL**（Task 1のhookが実プロバイダ応答に対して機能）
+- DB `account`: `access_token`はGoogleの生トークン形式（`ya29.`）ではない暗号文。2アカウント分とも同様
+- DB `principals`: `kind = user`の正式principalが1件作成される。`/api/identity/complete`を呼ぶまでは作られないという契約どおりの順序も確認した
+
+#### シナリオ5（統合）の実測
+
+ゲスト開始 → サインアウト状態からGoogleログイン → `POST /api/identity/complete`の順で実施した。
+
+- `POST /api/guest/start` が`tango_guest` Cookieを発行
+- 完了応答: `200`、`{ ..., "outcome": "merged" }`
+- **統合成功の応答でだけ`tango_guest`を失効させる**。ゲストCookieを持たない完了要求の応答にはSet-Cookieがない
+- DB: 取り込み元のguest principalとguest sessionはいずれも削除済み
+- DB `identity_merges`: 当該`merge_key`の`source_guest_token_hash`は64文字のHMAC-SHA-256 hexで、生トークンはどこにも保存されていない。`source_principal_id`は取り込み元削除に伴い`NULL`
+
+昇格(`promoted`)経路は、実施時点で両Googleアカウントとも正式principalを持っていたため実プロバイダでは再現していない。同経路は実PostgreSQLに対するrepository/HTTP統合テストで検証済み。
+
+したがってP2-3の自動境界はPASSであり、実OAuthはGoogleの主要2経路まで確認できた。GitHubを含むシナリオ2・3・4はリリース前の手動確認として残る。
 
 ## 5. 修正後のセキュリティ・契約状態
 
@@ -283,7 +309,7 @@ export async function moveOwnedDomainRows(
 
 ## 9. 再レビュー時の残件
 
-1. 実Google/GitHub OAuth 5シナリオは未実施。実資格情報と対話ブラウザが必要であり、provider mock境界テスト（Task 1の成功callback testを含む）を実OAuthの代替完了とは扱わない。
+1. 実OAuth 5シナリオのうち、2026-08-05にGoogleでシナリオ1と5（統合）を実施しPASSした（4章参照）。GitHubのOAuthアプリが未作成のためシナリオ2・3・4は未実施、シナリオ5の昇格経路も実プロバイダでは未再現。provider mock境界テスト（Task 1の成功callback testを含む）を実OAuthの代替完了とは扱わない。
 2. 最終ハードニングTask 1〜4、および従来から未commitだったTask 8/9/10相当の変更は、計画どおり1件の日本語Conventional Commit `f26104c` `fix: Phase 1レビュー指摘を一括解消する`（47ファイル）へまとめた。1章の論理境界表を参照。本節のこの記述だけは`f26104c`の後続commitで追記している。
 3. pushしていないため、GitHub CIは最新worktree差分では未実行。
 4. application CSRF、security headers、汎用rate limitはPhase 4のmandatory release gate。Phase 2のaudit writerを追加する前にevent別allowlist schemaを必須化する。
