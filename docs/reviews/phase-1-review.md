@@ -2,11 +2,11 @@
 
 - 更新日: 2026-08-05
 - 対象ブランチ: `feat/phase-1-foundation-identity`
-- commit済み対象範囲: `main` (`314264f`) から HEAD (`f26104c`) まで
+- commit済み対象範囲: `main` (`314264f`) から HEAD まで（最終ハードニング本体は `f26104c`。以降はレビュー資料の追記commitのみ）
 - 最終ハードニングのcommit: `f26104c` `fix: Phase 1レビュー指摘を一括解消する`（47ファイル）。Phase 1全体レビューのImportant 6件を解消する「最終ハードニング」Task 1〜4、および従来から未commitだったTask 8/9/10相当の変更を、計画どおり単一commitへまとめた（下表参照）
 - 計画: `docs/superpowers/plans/2026-08-01-tango-01-foundation-identity.md`（初回実装）、`docs/superpowers/plans/2026-08-02-tango-phase-1-final-hardening.md`（今回の最終ハードニング、Task 1〜5）
 - 仕様: `docs/superpowers/specs/2026-08-01-tango-spaced-repetition-design.md`（初回設計）、`docs/superpowers/specs/2026-08-02-tango-phase-1-final-hardening-design.md`（今回のハードニング設計、§1〜§4）
-- 状態: Phase 2未着手、pushなし、Codexが利用制限に到達したため今回のTask 1〜3独立レビューはClaudeが統括しタスクごとに別Sub-agentで実施（詳細は`docs/reviews/phase-1-codex-review.md`追記部）。差分は`f26104c`としてcommit済みで、pushはしていない
+- 状態: Phase 2未着手、pushなし、Codexが利用制限に到達したため今回のTask 1〜3独立レビューはClaudeが統括しタスクごとに別Sub-agentで実施（詳細は`docs/reviews/phase-1-codex-review.md`追記部）。差分は`f26104c`としてcommit済みで、2026-08-06に承認を得て`origin`の同名ブランチへpush済み（PR未作成、CIはsuccess）
 
 レビュー観点（計画 Task 6 Step 7、および最終ハードニング計画 Task 5 Step 2）: 仕様適合、識別処理の競合、Cookieとトークンの取り扱い、Better Auth設定、migration、テスト証跡、env/maintenance jobのfail-closed境界。
 
@@ -311,7 +311,7 @@ export async function moveOwnedDomainRows(
 
 1. 実OAuth 5シナリオのうち、2026-08-05にGoogleでシナリオ1と5（統合）を実施しPASSした（4章参照）。GitHubのOAuthアプリが未作成のためシナリオ2・3・4は未実施、シナリオ5の昇格経路も実プロバイダでは未再現。provider mock境界テスト（Task 1の成功callback testを含む）を実OAuthの代替完了とは扱わない。
 2. 最終ハードニングTask 1〜4、および従来から未commitだったTask 8/9/10相当の変更は、計画どおり1件の日本語Conventional Commit `f26104c` `fix: Phase 1レビュー指摘を一括解消する`（47ファイル）へまとめた。1章の論理境界表を参照。本節のこの記述だけは`f26104c`の後続commitで追記している。
-3. pushしていないため、GitHub CIは最新worktree差分では未実行。
+3. 2026-08-06に利用者の明示承認を得て `origin/feat/phase-1-foundation-identity` へpushした（新規ブランチ、force pushなし、PR未作成）。push前に追跡ファイルの全履歴を走査し、OAuthのclient ID/secretと個人のメールアドレスが含まれないことを確認した。GitHub Actions CI（`.github/workflows/ci.yml`）は最新commit `e5523d2` に対して **success**（51秒。空DBへのmigration適用、auth統合テスト、生成schema drift check、`bun run check`、`bun run build` を含む）。
 4. application CSRF、security headers、汎用rate limitはPhase 4のmandatory release gate。Phase 2のaudit writerを追加する前にevent別allowlist schemaを必須化する。
 5. Minor findings（guest touch CAS = M-1、test migration failure recovery = M-2、domain schema drift CI = M-4）はPhase 2開始を妨げない追跡事項として残る（6章参照）。
 6. 今回のレビュー体制の変更: 従来の親方レビュアーであったCodexが利用制限に到達したため、Task 1〜3の独立レビューはClaudeが統括し、タスクごとに別のSub-agentへ分離して実施した（Task 1: PASS。Task 2: Important 1件を検出し修正後にPASS。Task 3: PASS）。Task 4には同形式の独立レビュー記録はない。計画 Task 5 Step 4 の「base `314264f`からworktree全体をfresh reviewerへ渡す最終ブランチレビュー」は、利用制限を優先して**未実施**であり、Task 1〜3の独立レビュー3件と禁止パターンの機械走査（`any`/`@ts-ignore`/広い型assertion/非nullアサーション/secret/stage scope、いずれもヒットなし）で代替した。実OAuth以外の自動ゲート（`bun install`、`bun run check`、`bun run build`、`db:auth-schema:check`、`db:generate`、`db:migrate`）はすべて2026-08-05にfresh再実行済み。
