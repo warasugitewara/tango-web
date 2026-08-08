@@ -16,6 +16,10 @@ const POSTGRES_PROTOCOLS: ReadonlySet<string> = new Set([
 /**
  * PostgreSQLの接続URLとして解釈できるかどうかだけを判定する。
  * 判定結果には値を一切含めない。呼び出し側もキー名しか報告しない。
+ *
+ * `postgres:` はspecial schemeではないため `new URL('postgres:whatever')` も
+ * 成功してしまう。接続先を取り違えたまま起動しないよう、
+ * ホストとデータベース名が実際に入っていることまで確かめる。
  */
 function isPostgresConnectionUrl(value: string): boolean {
   let url: URL
@@ -26,7 +30,11 @@ function isPostgresConnectionUrl(value: string): boolean {
     return false
   }
 
-  return POSTGRES_PROTOCOLS.has(url.protocol)
+  return (
+    POSTGRES_PROTOCOLS.has(url.protocol) &&
+    url.hostname !== '' &&
+    url.pathname.replace(/^\//, '') !== ''
+  )
 }
 
 const environmentShape = {

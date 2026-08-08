@@ -105,6 +105,12 @@ describe('loadEnv', () => {
     ['プロトコルの違うhttps', 'https://tango:s3cret@10.0.0.5:5432/tango'],
     ['プロトコルの違うmysql', 'mysql://tango:s3cret@10.0.0.5:3306/tango'],
     ['接頭辞だけ一致するpostgresx', 'postgresx://tango:s3cret@10.0.0.5/tango'],
+    // `postgres:` は非special schemeなので、URLとしては解釈できてしまう。
+    // 接続先が定まらない形は起動前に落とす。
+    ['ホストもDB名もない不透明形式', 'postgres:whatever'],
+    ['ホストのない値', 'postgres://'],
+    ['DB名のない値', 'postgres://127.0.0.1:5432'],
+    ['DB名が空の値', 'postgres://127.0.0.1:5432/'],
   ] satisfies ReadonlyArray<readonly [string, string]>)(
     'rejects DATABASE_URL: %s',
     (_caseName, databaseUrl) => {

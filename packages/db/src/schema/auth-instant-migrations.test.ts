@@ -32,7 +32,14 @@ const EXPECTED_AUTH_INSTANT_COLUMNS = [
   'verification.updated_at',
 ] as const
 
+/** 後片付け待ちのDB名。掃除のたびに取り出して空になる。 */
 const createdDatabaseNames: string[] = []
+
+/**
+ * このテストが実際に作成したDB名。
+ * 掃除で消費しても消さず、削除して良い相手かの判定にだけ使う。
+ */
+const ownedDatabaseNames = new Set<string>()
 
 function connectionUrlFor(databaseName: string): string {
   const url = new URL(TEST_DATABASE_URL)
@@ -57,10 +64,34 @@ async function createIsolatedDatabase(): Promise<{
   }
 
   createdDatabaseNames.push(databaseName)
+  ownedDatabaseNames.add(databaseName)
   return { databaseName, connectionUrl: connectionUrlFor(databaseName) }
 }
 
+/** このテストが作る隔離DBの名前。この形以外は決して削除の対象にしない。 */
+const ISOLATED_DATABASE_NAME_PATTERN = /^tango_migration_[0-9a-f]{12}_test$/
+
+/**
+ * 削除して良い相手かを確かめる。
+ * `resetIdentityTables` と同じく、破壊操作の前に必ず通す。
+ * 接続先や認証情報はエラーへ出さない。
+ */
+function assertDroppableDatabaseName(databaseName: string): void {
+  if (
+    !ISOLATED_DATABASE_NAME_PATTERN.test(databaseName) ||
+    !ownedDatabaseNames.has(databaseName)
+  ) {
+    throw new Error(
+      'このテストが作成した隔離データベース以外は削除できません。',
+    )
+  }
+}
+
 async function dropIsolatedDatabase(databaseName: string): Promise<void> {
+  // 名前と接続先の両方を確かめてからでないと接続すらしない。
+  assertDroppableDatabaseName(databaseName)
+  assertTestDatabaseUrl(TEST_DATABASE_URL)
+
   const admin = postgres(TEST_DATABASE_URL, { max: 1 })
   try {
     await admin`drop database ${admin(databaseName)} with (force)`
@@ -253,6 +284,19 @@ afterEach(async () => {
 })
 
 describe('Better Auth instant migrations', () => {
+  test.each([
+    ['共有のテストDB', 'tango_test'],
+    ['本番を思わせる名前', 'tango'],
+    ['形は合うが作成していない名前', 'tango_migration_0123456789ab_test'],
+  ] satisfies ReadonlyArray<readonly [string, string]>)(
+    '%sの削除は接続する前に拒否する',
+    async (_caseName, databaseName) => {
+      await expect(dropIsolatedDatabase(databaseName)).rejects.toThrow(
+        /隔離データベース以外/,
+      )
+    },
+  )
+
   test('creates every auth instant as TIMESTAMPTZ on an empty database', async () => {
     const isolated = await createIsolatedDatabase()
 

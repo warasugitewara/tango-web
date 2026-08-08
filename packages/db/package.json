@@ -15,7 +15,6 @@
     "db:auth-schema:check": "bun run scripts/check-auth-schema.ts"
   },
   "dependencies": {
-    "drizzle-kit": "0.31.10",
     "drizzle-orm": "0.45.2",
     "postgres": "3.4.9",
     "uuid": "14.0.1"
@@ -23,6 +22,7 @@
   "devDependencies": {
     "@types/bun": "1.3.14",
     "auth": "1.6.25",
+    "drizzle-kit": "0.31.10",
     "typescript": "7.0.2"
   }
 }
