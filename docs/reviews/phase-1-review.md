@@ -176,7 +176,7 @@ Windows 11、Bun 1.3.14、専用PostgreSQL `127.0.0.1:55432`で実行した。
 
 - `POST /api/guest/start` が`tango_guest` Cookieを発行
 - 完了応答: `200`、`{ ..., "outcome": "merged" }`
-- **統合成功の応答でだけ`tango_guest`を失効させる**。ゲストCookieを持たない完了要求の応答にはSet-Cookieがない
+- **ゲストCookieを伴う完了が成功した応答でだけ`tango_guest`を失効させる**（`apps/api/src/features/auth/auth-routes.ts:136`）。失効対象は`merged`に限らず`created`/`promoted`/`existing`も含むが、いずれもその時点でゲストは消費済みか無効である。完了が失敗した応答、およびゲストCookieを持たない完了要求の応答にはSet-Cookieがない
 - DB: 取り込み元のguest principalとguest sessionはいずれも削除済み
 - DB `identity_merges`: 当該`merge_key`の`source_guest_token_hash`は64文字のHMAC-SHA-256 hexで、生トークンはどこにも保存されていない。`source_principal_id`は取り込み元削除に伴い`NULL`
 
@@ -314,5 +314,11 @@ export async function moveOwnedDomainRows(
 3. 2026-08-06に利用者の明示承認を得て `origin/feat/phase-1-foundation-identity` へpushした（新規ブランチ、force pushなし、PR未作成）。push前に追跡ファイルの全履歴を走査し、OAuthのclient ID/secretと個人のメールアドレスが含まれないことを確認した。GitHub Actions CI（`.github/workflows/ci.yml`）は最新commit `e5523d2` に対して **success**（51秒。空DBへのmigration適用、auth統合テスト、生成schema drift check、`bun run check`、`bun run build` を含む）。
 4. application CSRF、security headers、汎用rate limitはPhase 4のmandatory release gate。Phase 2のaudit writerを追加する前にevent別allowlist schemaを必須化する。
 5. Minor findings（guest touch CAS = M-1、test migration failure recovery = M-2、domain schema drift CI = M-4）はPhase 2開始を妨げない追跡事項として残る（6章参照）。
-6. 今回のレビュー体制の変更: 従来の親方レビュアーであったCodexが利用制限に到達したため、Task 1〜3の独立レビューはClaudeが統括し、タスクごとに別のSub-agentへ分離して実施した（Task 1: PASS。Task 2: Important 1件を検出し修正後にPASS。Task 3: PASS）。Task 4には同形式の独立レビュー記録はない。計画 Task 5 Step 4 の「base `314264f`からworktree全体をfresh reviewerへ渡す最終ブランチレビュー」は、利用制限を優先して**未実施**であり、Task 1〜3の独立レビュー3件と禁止パターンの機械走査（`any`/`@ts-ignore`/広い型assertion/非nullアサーション/secret/stage scope、いずれもヒットなし）で代替した。実OAuth以外の自動ゲート（`bun install`、`bun run check`、`bun run build`、`db:auth-schema:check`、`db:generate`、`db:migrate`）はすべて2026-08-05にfresh再実行済み。
-7. Phase 2には進まず、上記commitとGitHub CI実行後の再レビュー判定を待つ。
+6. 今回のレビュー体制の変更: 従来の親方レビュアーであったCodexが利用制限に到達したため、Task 1〜3の独立レビューはClaudeが統括し、タスクごとに別のSub-agentへ分離して実施した（Task 1: PASS。Task 2: Important 1件を検出し修正後にPASS。Task 3: PASS）。Task 4には同形式の独立レビュー記録はなかったため、後述の最終ブランチレビューで重点確認した。実OAuth以外の自動ゲート（`bun install`、`bun run check`、`bun run build`、`db:auth-schema:check`、`db:generate`、`db:migrate`）はすべて2026-08-05にfresh再実行済み。
+7. **最終ブランチレビュー（計画 Task 5 Step 4）を2026-08-06に実施した。** base `314264f` から当時のHEADまでのworktree全体を、それまでのタスクレビューとは別のfresh reviewerへ渡した。結果は **Critical 0件 / Important 0件 / Minor 7件、Phase 2着手「可」**。独立レビュー記録のなかったTask 4も設計書§4の全要件を回避経路なしで満たすと判定された。テスト件数表・実DB利用テストの列挙・TIMESTAMPTZ 12列＋unique index・`.env.example`の11キー一致・禁止パターン0ヒットは、いずれも実ファイル側から裏取りされ一致した。
+8. 最終ブランチレビューのMinor 7件の扱い。実装ブロッカーはない。
+   - **解消済み**: 「ゲストCookie失効条件の記述が実装より狭い」（本資料5章の文言を実装どおりに修正）、「HEADのSHAとCI実行状況の記述が陳腐化」（本節2・3で更新済み）
+   - **要判断（Phase 2の仕様として決める）**: 失効したゲストCookieを保持したまま`POST /api/guest/start`を呼ぶと、`requestContext`がゲスト解決失敗を`UNAUTHENTICATED`として返すため1回目が401になり、Cookie削除後の2回目で成功する。データ喪失・セキュリティ影響はないが、Phase 2のフロントが必ず踏む。`/api/guest/start`だけゲスト解決失敗を許容するか、再試行契約を仕様へ明記するかを決める
+   - **追跡（Phase 1の判定に影響しない）**: `DATABASE_URL`が不透明形式（`postgres:whatever`）やhost/database名なしのURLを通す（起動時に接続失敗するのみ）。`auth-instant-migrations.test.ts`の`dropIsolatedDatabase`にTask 3相当の三段ガードがない。`turnstile-client.ts`に単体テストがない。safe loggerのテストが自作関数の直接呼び出しで、Better Authが実際にそのloggerを使うことまでは検証していない（実callback統合テストで間接的に担保）。`drizzle-kit`が`packages/db`の`dependencies`にある（`devDependencies`が適切）
+9. Phase 2着手時に引き継ぐ規約: ドメイン行の移送は`moveOwnedDomainRows`（`packages/db/src/repositories/principal-repository.ts`）の内部だけを拡張する。同関数の完了後にsource principalが削除されるため、移送漏れはcascadeで失われる。
+10. Better Auth 1.6.25は`storeStateStrategy: 'database'`でも署名済み`state` Cookieをcallbackで突き合わせる。フロントエンドは必ずブラウザからサインインを開始する必要がある（4章参照）。
