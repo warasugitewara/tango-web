@@ -6,7 +6,7 @@
 - 最終ハードニングのcommit: `f26104c` `fix: Phase 1レビュー指摘を一括解消する`（47ファイル）。Phase 1全体レビューのImportant 6件を解消する「最終ハードニング」Task 1〜4、および従来から未commitだったTask 8/9/10相当の変更を、計画どおり単一commitへまとめた（下表参照）
 - 計画: `docs/superpowers/plans/2026-08-01-tango-01-foundation-identity.md`（初回実装）、`docs/superpowers/plans/2026-08-02-tango-phase-1-final-hardening.md`（今回の最終ハードニング、Task 1〜5）
 - 仕様: `docs/superpowers/specs/2026-08-01-tango-spaced-repetition-design.md`（初回設計）、`docs/superpowers/specs/2026-08-02-tango-phase-1-final-hardening-design.md`（今回のハードニング設計、§1〜§4）
-- 状態: Phase 2未着手、pushなし、Codexが利用制限に到達したため今回のTask 1〜3独立レビューはClaudeが統括しタスクごとに別Sub-agentで実施（詳細は`docs/reviews/phase-1-codex-review.md`追記部）。差分は`f26104c`としてcommit済みで、2026-08-06に承認を得て`origin`の同名ブランチへpush済み（PR未作成、CIはsuccess）
+- 状態: Phase 2未着手、Codexが利用制限に到達したため今回のTask 1〜3独立レビューはClaudeが統括しタスクごとに別Sub-agentで実施（詳細は`docs/reviews/phase-1-codex-review.md`追記部）。差分は`f26104c`としてcommit済みで、2026-08-06に承認を得て`origin`の同名ブランチへpush済み（PR未作成、CIはsuccess）
 
 レビュー観点（計画 Task 6 Step 7、および最終ハードニング計画 Task 5 Step 2）: 仕様適合、識別処理の競合、Cookieとトークンの取り扱い、Better Auth設定、migration、テスト証跡、env/maintenance jobのfail-closed境界。
 
@@ -101,7 +101,7 @@ Windows 11、Bun 1.3.14、専用PostgreSQL `127.0.0.1:55432`で実行した。
 | コマンド | fresh結果 |
 | --- | --- |
 | `bun install --frozen-lockfile` | exit 0、217 installs / 336 packages、変更なし |
-| `bun run check` | exit 0、Biome **67 files**修正なし、4 workspace typecheck exit 0、Vitest **19 files / 220 tests pass** |
+| `bun run check` | exit 0、4 workspace typecheck exit 0、Vitest **20 files / 236 tests pass**（2026-08-06のMinor修正後に再実行。修正前は19 files / 220 tests） |
 | `bun run build` | exit 0、全workspace成功。API 769 modules / 2.49 MB、Web 190.47 kB（gzip 60.07 kB） |
 | `bun run db:auth-schema:check` | exit 0、`auth@1.6.25`生成結果とTIMESTAMPTZ変換・複合unique indexに一致 |
 | `bun run db:generate` | exit 0、`No schema changes, nothing to migrate` |
@@ -115,7 +115,7 @@ Windows 11、Bun 1.3.14、専用PostgreSQL `127.0.0.1:55432`で実行した。
 | `apps/api/src/jobs/purge-expired-guests.test.ts` | 24 |
 | `apps/api/src/features/auth/auth-routes.test.ts` | 23 |
 | `apps/api/src/features/auth/provider-routes.test.ts` | 22 |
-| `apps/api/src/env.test.ts` | 17 |
+| `apps/api/src/env.test.ts` | 21 |
 | `packages/db/src/repositories/principal-repository.test.ts` | 16 |
 | `packages/shared/src/errors/app-error.test.ts` | 15 |
 | `packages/db/src/test/database.test.ts` | 12 |
@@ -126,11 +126,12 @@ Windows 11、Bun 1.3.14、専用PostgreSQL `127.0.0.1:55432`で実行した。
 | `packages/db/scripts/auth-schema.test.ts` | 6 |
 | `apps/api/src/features/auth/identity-completion-service.test.ts` | 6 |
 | `apps/api/src/middleware/error-handler.test.ts` | 5 |
-| `packages/db/src/schema/auth-instant-migrations.test.ts` | 2 |
+| `packages/db/src/schema/auth-instant-migrations.test.ts` | 5 |
+| `apps/api/src/features/auth/turnstile-client.test.ts` | 9 |
 | `packages/db/src/schema/account-identity.test.ts` | 2 |
 | `apps/api/src/features/auth/oauth-callback.integration.test.ts` | 2 |
 | `tests/config/workspace.test.ts` | 1 |
-| **合計** | **220** |
+| **合計** | **236** |
 
 165件（2026-08-02時点）から220件への増加55件は、今回のTask 1〜4回帰（provider identity一意性、mergeKeyのsource binding、`TestDatabaseHandle`拒否matrix、env/purge argv fail-closed、`toSafeErrorName`単体test）と、それに伴う既存ファイルへのcase追加による。
 
@@ -319,6 +320,7 @@ export async function moveOwnedDomainRows(
 8. 最終ブランチレビューのMinor 7件の扱い。実装ブロッカーはない。
    - **解消済み**: 「ゲストCookie失効条件の記述が実装より狭い」（本資料5章の文言を実装どおりに修正）、「HEADのSHAとCI実行状況の記述が陳腐化」（本節2・3で更新済み）
    - **要判断（Phase 2の仕様として決める）**: 失効したゲストCookieを保持したまま`POST /api/guest/start`を呼ぶと、`requestContext`がゲスト解決失敗を`UNAUTHENTICATED`として返すため1回目が401になり、Cookie削除後の2回目で成功する。データ喪失・セキュリティ影響はないが、Phase 2のフロントが必ず踏む。`/api/guest/start`だけゲスト解決失敗を許容するか、再試行契約を仕様へ明記するかを決める
-   - **追跡（Phase 1の判定に影響しない）**: `DATABASE_URL`が不透明形式（`postgres:whatever`）やhost/database名なしのURLを通す（起動時に接続失敗するのみ）。`auth-instant-migrations.test.ts`の`dropIsolatedDatabase`にTask 3相当の三段ガードがない。`turnstile-client.ts`に単体テストがない。safe loggerのテストが自作関数の直接呼び出しで、Better Authが実際にそのloggerを使うことまでは検証していない（実callback統合テストで間接的に担保）。`drizzle-kit`が`packages/db`の`dependencies`にある（`devDependencies`が適切）
+   - **2026-08-06に修正済み（commit `d11c1fe` `fix: 最終レビューのMinor指摘を解消する`）**: `DATABASE_URL`が不透明形式（`postgres:whatever`）やhost/database名なしのURLを通していた点を、protocolに加えてhostとデータベース名の非空を検査するfail closedへ変更し回帰4件を追加。`auth-instant-migrations.test.ts`の`dropIsolatedDatabase`に、名前パターンと「このテストが実際に作成した名前」の両方を接続前に検査するガードと拒否テスト3件を追加。`turnstile-client.ts`へ失敗経路・送信内容・secret非漏洩の単体テスト9件を新規追加。`drizzle-kit`を`packages/db`の`devDependencies`へ移動
+   - **追跡（Phase 1の判定に影響しない）**: safe loggerのテストが自作関数の直接呼び出しで、Better Authが実際にそのloggerを使うことまでは検証していない（実callback統合テストと2026-08-05の実OAuthで間接的に担保）
 9. Phase 2着手時に引き継ぐ規約: ドメイン行の移送は`moveOwnedDomainRows`（`packages/db/src/repositories/principal-repository.ts`）の内部だけを拡張する。同関数の完了後にsource principalが削除されるため、移送漏れはcascadeで失われる。
 10. Better Auth 1.6.25は`storeStateStrategy: 'database'`でも署名済み`state` Cookieをcallbackで突き合わせる。フロントエンドは必ずブラウザからサインインを開始する必要がある（4章参照）。
