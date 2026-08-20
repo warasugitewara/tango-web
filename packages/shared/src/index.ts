@@ -1,5 +1,15 @@
 export type { Actor, ServiceContext } from './contracts/actor'
 export {
+  type CardContentInput,
+  cardContentSchema,
+  type DeckCreateInput,
+  type DeckUpdateInput,
+  deckCreateSchema,
+  deckUpdateSchema,
+  type ImportRequest,
+  importRequestSchema,
+} from './contracts/content'
+export {
   type ApiErrorEnvelope,
   AppError,
   type AppErrorCode,
