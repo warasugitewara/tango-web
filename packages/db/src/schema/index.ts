@@ -2,4 +2,6 @@
 // auth.generated.ts は `bun run db:auth-schema` の出力であり、手で編集しない。
 export * from './audit'
 export * from './auth.generated'
+export * from './content'
 export * from './principals'
+export * from './study'
