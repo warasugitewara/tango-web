@@ -10,6 +10,7 @@ describe('AppError', () => {
     ['FORBIDDEN', 403],
     ['NOT_FOUND', 404],
     ['CONFLICT', 409],
+    ['STUDY_STATE_CONFLICT', 409],
     ['RATE_LIMITED', 429],
     ['INTERNAL_ERROR', 500],
   ] as const)('%s は HTTP %d を返す', (code, status) => {
@@ -19,6 +20,13 @@ describe('AppError', () => {
   test('既定の公開メッセージは日本語である', () => {
     expect(new AppError('NOT_FOUND').publicMessage).toBe(
       '対象が見つかりませんでした。',
+    )
+  })
+
+  test('学習状態の競合は読み直しを促す日本語を返す', () => {
+    // 通常のCONFLICTと文言を分け、利用者が次に取る行動を明確にする。
+    expect(new AppError('STUDY_STATE_CONFLICT').publicMessage).toBe(
+      '学習状態が更新されています。最新の状態を読み込み直してください。',
     )
   })
 

@@ -10,6 +10,7 @@ export type AppErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'CONFLICT'
+  | 'STUDY_STATE_CONFLICT'
   | 'RATE_LIMITED'
   | 'INTERNAL_ERROR'
 
@@ -51,6 +52,10 @@ const APP_ERROR_DEFAULTS: Readonly<Record<AppErrorCode, AppErrorDefault>> = {
     status: 409,
     message:
       '他の変更と競合しました。最新の状態を読み込んでからやり直してください。',
+  },
+  STUDY_STATE_CONFLICT: {
+    status: 409,
+    message: '学習状態が更新されています。最新の状態を読み込み直してください。',
   },
   RATE_LIMITED: {
     status: 429,
