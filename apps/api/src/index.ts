@@ -1,4 +1,8 @@
-import { createDatabase, createPrincipalRepository } from '@tango/db'
+import {
+  createContentRepository,
+  createDatabase,
+  createPrincipalRepository,
+} from '@tango/db'
 import { createApp } from './app'
 import { isSecureCookieOrigin, loadEnv, readSecretFile } from './env'
 import { createActorResolver } from './features/auth/actor-resolver'
@@ -68,6 +72,7 @@ const app = createApp({
   }),
   authHandler: (request) => auth.handler(request),
   cookieSecure,
+  contentRepository: createContentRepository(database.db),
 })
 
 const server = Bun.serve({ fetch: app.fetch })

@@ -1,9 +1,11 @@
+import type { ContentRepository } from '@tango/db'
 import { Hono } from 'hono'
 import type { ActorResolver } from './features/auth/actor-resolver'
 import { createAuthRoutes } from './features/auth/auth-routes'
 import type { Clock, GuestService } from './features/auth/guest-service'
 import type { IdentityCompletionService } from './features/auth/identity-completion-service'
 import { createOAuthErrorRoutes } from './features/auth/oauth-error-page'
+import { createContentRoutes } from './features/content/content-routes'
 import { errorHandler } from './middleware/error-handler'
 import { jsonBodyGuard } from './middleware/json-body-guard'
 import {
@@ -21,6 +23,8 @@ export type AppDependencies = {
   authHandler: (request: Request) => Promise<Response>
   /** 本番のHTTPS配信では true。ローカルのHTTP検証でのみ false にする。 */
   cookieSecure: boolean
+  /** 認証境界だけを検証する既存テストでは省略できる。 */
+  contentRepository?: ContentRepository
 }
 
 export function createApp(deps: AppDependencies) {
@@ -61,6 +65,13 @@ export function createApp(deps: AppDependencies) {
       cookieSecure: deps.cookieSecure,
     }),
   )
+
+  if (deps.contentRepository !== undefined) {
+    app.route(
+      '/api',
+      createContentRoutes({ repository: deps.contentRepository }),
+    )
+  }
 
   return app
 }
