@@ -10,6 +10,17 @@ export {
   type DatabaseTransaction,
 } from './client'
 export {
+  type CardContent,
+  type CardRecord,
+  type ContentRepository,
+  type CreateDeckInput,
+  createContentRepository,
+  type DeckSummary,
+  hashCardContent,
+  normalizeDeckName,
+  type UpdateDeckInput,
+} from './repositories/content-repository'
+export {
   createPrincipalRepository,
   type GuestSessionRecord,
   type IdentityCompletionOutcome,

@@ -2,10 +2,13 @@ import { and, eq, gt, inArray, isNull, lte, notExists } from 'drizzle-orm'
 import { v7 as uuidv7 } from 'uuid'
 import type { Database, DatabaseTransaction } from '../client'
 import {
+  decks,
   guestSessions,
   identityMerges,
   type PrincipalKind,
   principals,
+  reviewEvents,
+  studySessions,
   userSettings,
 } from '../schema'
 
@@ -302,12 +305,30 @@ async function ensureUserSettings(
 export async function moveOwnedDomainRows(
   sourcePrincipalId: string,
   targetPrincipalId: string,
-  _tx: DatabaseTransaction,
+  tx: DatabaseTransaction,
 ): Promise<void> {
   if (sourcePrincipalId === targetPrincipalId) {
     return
   }
-  // Phase 1: 移送対象のドメインテーブルはまだ存在しない。
+
+  // デッキだけを移せばよい。カード・スケジュール・レビュー履歴は
+  // deck_id と card_id を辿るため、所有者列を持たない。
+  await tx
+    .update(decks)
+    .set({ principalId: targetPrincipalId })
+    .where(eq(decks.principalId, sourcePrincipalId))
+
+  // レビュー履歴はprincipalを直接持つため、明示的に移す。
+  await tx
+    .update(reviewEvents)
+    .set({ principalId: targetPrincipalId })
+    .where(eq(reviewEvents.principalId, sourcePrincipalId))
+
+  // 学習セッションも同様。移さないと削除時にcascadeで履歴の参照元が消える。
+  await tx
+    .update(studySessions)
+    .set({ principalId: targetPrincipalId })
+    .where(eq(studySessions.principalId, sourcePrincipalId))
 }
 
 export function createPrincipalRepository(db: Database): PrincipalRepository {

@@ -236,6 +236,56 @@ describe('PrincipalRepository', () => {
     expect(merge?.targetPrincipalId).toBe(created.principal.id)
   })
 
+  test('moves decks and study history to the target principal on merge', async () => {
+    const now = new Date()
+    const userId = await insertFormalUser(now)
+    const created = await repository.completeIdentity({
+      userId,
+      guestTokenHash: null,
+      mergeKey: uuidv7(),
+      now,
+    })
+
+    // ゲスト側に学習データを作ってから統合する。
+    const input = guestInput(now)
+    const guest = await repository.createGuest(input)
+    const deckId = uuidv7()
+    await database().db.insert(schema.decks).values({
+      id: deckId,
+      principalId: guest.principalId,
+      name: '英単語',
+      normalizedName: '英単語',
+    })
+    const cardId = uuidv7()
+    await database().db.insert(schema.cards).values({
+      id: cardId,
+      deckId,
+      front: '表',
+      back: '裏',
+      contentHash: 'hash',
+    })
+
+    const merged = await repository.completeIdentity({
+      userId,
+      guestTokenHash: input.tokenHash,
+      mergeKey: uuidv7(),
+      now,
+    })
+
+    expect(merged.outcome).toBe('merged')
+
+    // 取り込み元principalは消えるが、デッキとカードは取り込み先へ移る。
+    const [deck] = await database().db
+      .select({ principalId: schema.decks.principalId })
+      .from(schema.decks)
+    expect(deck?.principalId).toBe(created.principal.id)
+
+    const remainingCards = await database().db
+      .select({ id: schema.cards.id })
+      .from(schema.cards)
+    expect(remainingCards.map((row) => row.id)).toEqual([cardId])
+  })
+
   test('returns the existing principal when completion is retried', async () => {
     const now = new Date()
     const userId = await insertFormalUser(now)
