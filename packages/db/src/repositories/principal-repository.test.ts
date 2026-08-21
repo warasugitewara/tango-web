@@ -275,13 +275,13 @@ describe('PrincipalRepository', () => {
     expect(merged.outcome).toBe('merged')
 
     // 取り込み元principalは消えるが、デッキとカードは取り込み先へ移る。
-    const [deck] = await database().db
-      .select({ principalId: schema.decks.principalId })
+    const [deck] = await database()
+      .db.select({ principalId: schema.decks.principalId })
       .from(schema.decks)
     expect(deck?.principalId).toBe(created.principal.id)
 
-    const remainingCards = await database().db
-      .select({ id: schema.cards.id })
+    const remainingCards = await database()
+      .db.select({ id: schema.cards.id })
       .from(schema.cards)
     expect(remainingCards.map((row) => row.id)).toEqual([cardId])
   })

@@ -30,5 +30,22 @@ export {
   type PrincipalRepository,
   type PurgeExpiredGuestsResult,
 } from './repositories/principal-repository'
+export {
+  type AppliedSchedule,
+  CardNotFoundError,
+  type CountInput,
+  type CreateSessionInput,
+  createStudyRepository,
+  type QueuedCard,
+  type QueueInput,
+  type Rating,
+  type RemainingCounts,
+  type ReviewOutcome,
+  type ScheduleRow,
+  type ScheduleSeed,
+  type StudyRepository,
+  StudyStateConflictError,
+  type SubmitReviewInput,
+} from './repositories/study-repository'
 export * as schema from './schema'
 export type { IdentityMergeStatus, PrincipalKind } from './schema/principals'
