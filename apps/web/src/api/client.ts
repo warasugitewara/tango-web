@@ -2,6 +2,9 @@ import type {
   CardContentInput,
   DeckCreateInput,
   ImportRequest,
+  PublicRating,
+  ReviewSubmitInput,
+  StudySessionCreateInput,
 } from '@tango/shared'
 
 export type SessionView =
@@ -37,6 +40,19 @@ export type CardRecord = {
   updatedAt: string
 }
 
+export type StudySessionView = {
+  sessionId: string
+  learningDay: string
+  card: { id: string; deckId: string; front: string; back: string } | null
+  schedule: { scheduleVersion: number } | null
+  intervalPreviews: Readonly<
+    Record<PublicRating, { dueAt: string; scheduledDays: number }>
+  > | null
+  remainingReview: number
+  remainingLearning: number
+  remainingNew: number
+}
+
 export class ApiClientError extends Error {
   readonly code: string
 
@@ -54,6 +70,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function requiredString(record: Record<string, unknown>, key: string): string {
   const value = record[key]
   if (typeof value !== 'string') {
+    throw new ApiClientError(
+      'INVALID_RESPONSE',
+      'サーバー応答を解釈できません。',
+    )
+  }
+  return value
+}
+
+function requiredNumber(record: Record<string, unknown>, key: string): number {
+  const value = record[key]
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new ApiClientError(
       'INVALID_RESPONSE',
       'サーバー応答を解釈できません。',
@@ -137,6 +164,83 @@ function parseCard(value: unknown): CardRecord {
     contentHash: requiredString(value, 'contentHash'),
     createdAt: requiredString(value, 'createdAt'),
     updatedAt: requiredString(value, 'updatedAt'),
+  }
+}
+
+function parseStudyCard(value: unknown): StudySessionView['card'] {
+  if (value === null) {
+    return null
+  }
+  if (!isRecord(value)) {
+    throw new ApiClientError('INVALID_RESPONSE', '学習状態を読み込めません。')
+  }
+  return {
+    id: requiredString(value, 'id'),
+    deckId: requiredString(value, 'deckId'),
+    front: requiredString(value, 'front'),
+    back: requiredString(value, 'back'),
+  }
+}
+
+function parseStudySchedule(value: unknown): StudySessionView['schedule'] {
+  if (value === null) {
+    return null
+  }
+  if (!isRecord(value)) {
+    throw new ApiClientError('INVALID_RESPONSE', '学習状態を読み込めません。')
+  }
+  return { scheduleVersion: requiredNumber(value, 'scheduleVersion') }
+}
+
+function parseIntervalPreview(value: unknown) {
+  if (!isRecord(value)) {
+    throw new ApiClientError('INVALID_RESPONSE', '学習状態を読み込めません。')
+  }
+  return {
+    dueAt: requiredString(value, 'dueAt'),
+    scheduledDays: requiredNumber(value, 'scheduledDays'),
+  }
+}
+
+function parseIntervalPreviews(
+  value: unknown,
+): StudySessionView['intervalPreviews'] {
+  if (value === null) {
+    return null
+  }
+  if (!isRecord(value)) {
+    throw new ApiClientError('INVALID_RESPONSE', '学習状態を読み込めません。')
+  }
+  return {
+    1: parseIntervalPreview(value['1']),
+    2: parseIntervalPreview(value['2']),
+    3: parseIntervalPreview(value['3']),
+    4: parseIntervalPreview(value['4']),
+  }
+}
+
+function parseStudySession(value: unknown): StudySessionView {
+  if (!isRecord(value)) {
+    throw new ApiClientError('INVALID_RESPONSE', '学習状態を読み込めません。')
+  }
+  const card = parseStudyCard(value.card)
+  const schedule = parseStudySchedule(value.schedule)
+  const intervalPreviews = parseIntervalPreviews(value.intervalPreviews)
+  if (
+    (card === null) !== (schedule === null) ||
+    (card === null) !== (intervalPreviews === null)
+  ) {
+    throw new ApiClientError('INVALID_RESPONSE', '学習状態を読み込めません。')
+  }
+  return {
+    sessionId: requiredString(value, 'sessionId'),
+    learningDay: requiredString(value, 'learningDay'),
+    card,
+    schedule,
+    intervalPreviews,
+    remainingReview: requiredNumber(value, 'remainingReview'),
+    remainingLearning: requiredNumber(value, 'remainingLearning'),
+    remainingNew: requiredNumber(value, 'remainingNew'),
   }
 }
 
@@ -239,5 +343,24 @@ export const apiClient = {
       throw new ApiClientError('INVALID_RESPONSE', 'カードを取り込めません。')
     }
     return body.created
+  },
+  async createStudySession(
+    input: StudySessionCreateInput,
+  ): Promise<StudySessionView> {
+    return parseStudySession(
+      await request('/api/study/sessions', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    )
+  },
+  async getStudySession(sessionId: string): Promise<StudySessionView> {
+    return parseStudySession(await request(`/api/study/sessions/${sessionId}`))
+  },
+  async submitReview(input: ReviewSubmitInput): Promise<void> {
+    await request('/api/study/reviews', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
   },
 }

@@ -2,19 +2,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router'
 import { DeckDetailScreen } from '../screens/DeckDetailScreen'
 import { DeckListScreen } from '../screens/DeckListScreen'
+import { StudyScreen } from '../screens/StudyScreen'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 10_000 } },
 })
-
-function PendingScreen(props: { title: string }) {
-  return (
-    <main className="shell">
-      <h1>{props.title}</h1>
-      <p>この画面を準備しています。</p>
-    </main>
-  )
-}
 
 export function App() {
   return (
@@ -23,7 +15,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<DeckListScreen />} />
           <Route path="/decks/:deckId" element={<DeckDetailScreen />} />
-          <Route path="/study" element={<PendingScreen title="学習" />} />
+          <Route path="/study" element={<StudyScreen />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

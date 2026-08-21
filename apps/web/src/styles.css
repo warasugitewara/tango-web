@@ -372,6 +372,127 @@ textarea {
   font-weight: 700;
 }
 
+.study-shell {
+  width: min(860px, calc(100% - 32px));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 32px 0 64px;
+}
+
+.study-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.study-header a {
+  color: #315c75;
+  font-weight: 700;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.remaining-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 0;
+  padding: 0;
+  color: #607278;
+  border: 0;
+  font:
+    650 0.78rem / 1.4 ui-monospace,
+    "Cascadia Mono",
+    monospace;
+}
+
+.remaining-counts strong {
+  color: #17252b;
+}
+
+.study-card {
+  min-height: 430px;
+  background: #f9fbfa;
+  border: 1px solid #b7c8c5;
+  border-top: 9px solid #315c75;
+  box-shadow: 0 24px 70px rgba(23, 37, 43, 0.1);
+}
+
+.study-face {
+  min-height: 210px;
+  display: grid;
+  place-content: center;
+  padding: clamp(30px, 8vw, 72px);
+  text-align: center;
+  font-size: clamp(1.25rem, 4vw, 2rem);
+}
+
+.study-back {
+  border-top: 1px dashed #aebfbc;
+  background: #f2f6f4;
+}
+
+.study-face .eyebrow {
+  margin-bottom: 18px;
+}
+
+.reveal-button {
+  display: block;
+  width: min(340px, 100%);
+  margin: 24px auto 0;
+  padding: 15px 20px;
+  color: white;
+  background: #315c75;
+  border: 0;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.rating-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 24px;
+  padding: 0;
+  border: 0;
+}
+
+.rating-grid button {
+  display: grid;
+  gap: 7px;
+  padding: 14px 10px;
+  color: #17252b;
+  background: #f9fbfa;
+  border: 1px solid #aebfbc;
+  cursor: pointer;
+}
+
+.rating-grid button:first-child {
+  color: #8a3829;
+  border-color: #dc9b8c;
+}
+
+.rating-grid strong {
+  color: #315c75;
+  font-size: 0.8rem;
+}
+
+.study-complete {
+  display: grid;
+  place-content: center;
+  text-align: center;
+}
+
 @media (max-width: 640px) {
   .shell {
     width: min(100% - 24px, 1040px);
@@ -410,6 +531,15 @@ textarea {
   .card-form,
   .content-card {
     grid-template-columns: 1fr;
+  }
+
+  .study-header {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .rating-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
 
