@@ -1,10 +1,34 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest'
 import { DeckDetailScreen } from './DeckDetailScreen'
 
 const DECK_ID = '019fd000-0000-7000-8000-000000000010'
+let styleElement: HTMLStyleElement
+
+beforeAll(() => {
+  styleElement = document.createElement('style')
+  styleElement.textContent = readFileSync(
+    resolve(process.cwd(), 'apps/web/src/styles.css'),
+    'utf8',
+  )
+  document.head.append(styleElement)
+})
+
+afterAll(() => {
+  styleElement.remove()
+})
 
 afterEach(() => {
   cleanup()
@@ -59,6 +83,18 @@ function renderScreen() {
 }
 
 describe('DeckDetailScreen', () => {
+  test('学習リンクは濃色背景でも白文字で表示する', async () => {
+    renderScreen()
+
+    const studyLink = await screen.findByRole('link', {
+      name: 'この単語帳を学習',
+    })
+    const style = window.getComputedStyle(studyLink)
+
+    expect(style.backgroundColor).toBe('rgb(49, 92, 117)')
+    expect(style.color).toBe('rgb(255, 255, 255)')
+  })
+
   test('カード作成後に一覧を更新する', async () => {
     renderScreen()
 

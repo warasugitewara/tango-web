@@ -1,4 +1,13 @@
-import { and, eq, gt, inArray, isNull, lte, notExists } from 'drizzle-orm'
+import {
+  and,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  notExists,
+} from 'drizzle-orm'
 import { v7 as uuidv7 } from 'uuid'
 import type { Database, DatabaseTransaction } from '../client'
 import {
@@ -309,6 +318,31 @@ export async function moveOwnedDomainRows(
 ): Promise<void> {
   if (sourcePrincipalId === targetPrincipalId) {
     return
+  }
+
+  // 両principalが同じ初期コンテンツを持つ場合も、どちらかを削除しない。
+  // target側だけを自動生成済みの目印として残し、source側は通常デッキへ
+  // 変えてから移すことで、一意制約を守りつつ双方の学習履歴を保持する。
+  const targetSeedRows = await tx
+    .select({ seedKey: decks.seedKey })
+    .from(decks)
+    .where(
+      and(eq(decks.principalId, targetPrincipalId), isNotNull(decks.seedKey)),
+    )
+  const targetSeedKeys = targetSeedRows.flatMap(({ seedKey }) =>
+    seedKey === null ? [] : [seedKey],
+  )
+
+  if (targetSeedKeys.length > 0) {
+    await tx
+      .update(decks)
+      .set({ seedKey: null })
+      .where(
+        and(
+          eq(decks.principalId, sourcePrincipalId),
+          inArray(decks.seedKey, targetSeedKeys),
+        ),
+      )
   }
 
   // デッキだけを移せばよい。カード・スケジュール・レビュー履歴は

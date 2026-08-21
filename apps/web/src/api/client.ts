@@ -298,6 +298,9 @@ export const apiClient = {
     }
     return parseDeck(body.deck)
   },
+  async deleteDeck(deckId: string): Promise<void> {
+    await request(`/api/decks/${deckId}`, { method: 'DELETE' })
+  },
   async listCards(deckId: string): Promise<readonly CardRecord[]> {
     const body = await request(`/api/decks/${deckId}/cards`)
     if (!isRecord(body) || !Array.isArray(body.cards)) {

@@ -61,7 +61,8 @@ export function createContentRoutes(options: {
 
   return new Hono<AppEnv>()
     .get('/decks', async (context) => {
-      const { actor } = requireServiceContext(context)
+      const { actor, now } = requireServiceContext(context)
+      await repository.ensureDemoDeck(actor.principalId, toDate(now))
       const decks = await repository.listDecks(actor.principalId)
       return context.json({ decks })
     })

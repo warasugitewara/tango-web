@@ -30,6 +30,12 @@ export function DeckListScreen() {
       await queryClient.invalidateQueries({ queryKey: ['decks'] })
     },
   })
+  const deleteDeck = useMutation({
+    mutationFn: (deckId: string) => apiClient.deleteDeck(deckId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['decks'] })
+    },
+  })
   const receiveToken = useCallback((token: string | null) => {
     setTurnstileToken(token)
   }, [])
@@ -134,6 +140,23 @@ export function DeckListScreen() {
             <div className="deck-actions">
               <Link to={`/decks/${deck.id}`}>カードを見る</Link>
               <Link to={`/study?deckId=${deck.id}`}>学習する</Link>
+              <button
+                aria-label={`${deck.name}を削除`}
+                className="danger-button"
+                type="button"
+                disabled={deleteDeck.isPending}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `「${deck.name}」を削除します。元に戻せません。`,
+                    )
+                  ) {
+                    deleteDeck.mutate(deck.id)
+                  }
+                }}
+              >
+                削除
+              </button>
             </div>
           </article>
         ))}

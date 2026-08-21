@@ -36,6 +36,8 @@ export const decks = pgTable(
     name: text('name').notNull(),
     /** 重複判定と統合時の突き合わせに使う正規化名。 */
     normalizedName: text('normalized_name').notNull(),
+    /** 自動追加コンテンツの世代キー。削除後の再生成を防ぐ。 */
+    seedKey: text('seed_key'),
     description: text('description'),
     sortOrder: integer('sort_order').notNull().default(0),
     /** 1学習日あたりに出す新規カードの上限。0は新規を出さない。 */
@@ -52,6 +54,9 @@ export const decks = pgTable(
     ),
     index('decks_principal_id_idx').on(table.principalId),
     index('decks_trashed_at_idx').on(table.trashedAt),
+    uniqueIndex('decks_principal_seed_key_uidx')
+      .on(table.principalId, table.seedKey)
+      .where(sql`${table.seedKey} is not null`),
   ],
 )
 

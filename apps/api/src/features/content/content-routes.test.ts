@@ -12,6 +12,9 @@ const RAW_TOKEN = 'content-route-token'
 
 function createRepository(): ContentRepository {
   return {
+    async ensureDemoDeck() {
+      // 各テストで必要な場合だけ上書きする。
+    },
     async listDecks() {
       return []
     },
@@ -111,6 +114,40 @@ describe('content routes', () => {
     expect(response.status).toBe(401)
     expect(await response.json()).toMatchObject({
       error: { code: 'UNAUTHENTICATED' },
+    })
+  })
+
+  test('一覧取得前にデモデッキを用意する', async () => {
+    let seeded = false
+    const repository: ContentRepository = {
+      ...createRepository(),
+      async ensureDemoDeck(principalId, now) {
+        expect(principalId).toBe('principal-content')
+        expect(now.toISOString()).toBe('2026-08-21T03:00:00.000Z')
+        seeded = true
+      },
+      async listDecks() {
+        return seeded
+          ? [
+              {
+                id: uuidv7(),
+                name: 'デモ',
+                description: 'ローマ字とひらがなの練習用です。',
+                newCardLimit: 20,
+                cardCount: 46,
+              },
+            ]
+          : []
+      },
+    }
+
+    const response = await createHarness(repository).request('/api/decks', {
+      headers: guestHeaders(),
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      decks: [{ name: 'デモ', cardCount: 46 }],
     })
   })
 

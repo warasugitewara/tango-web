@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { DeckListScreen } from './DeckListScreen'
@@ -10,12 +10,29 @@ afterEach(() => {
 })
 
 function renderScreen(session: unknown, decks: unknown[] = []) {
-  const fetchStub = async (input: RequestInfo | URL): Promise<Response> => {
+  let currentDecks = [...decks]
+  const deletedPaths: string[] = []
+  const fetchStub = async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
     const path = new URL(
       typeof input === 'string' ? input : input.toString(),
       'https://tango.test',
     ).pathname
-    const body = path === '/api/session' ? session : { decks }
+    if (init?.method === 'DELETE' && path.startsWith('/api/decks/')) {
+      deletedPaths.push(path)
+      const deletedId = path.slice('/api/decks/'.length)
+      currentDecks = currentDecks.filter(
+        (deck) =>
+          typeof deck !== 'object' ||
+          deck === null ||
+          !('id' in deck) ||
+          deck.id !== deletedId,
+      )
+      return new Response(null, { status: 204 })
+    }
+    const body = path === '/api/session' ? session : { decks: currentDecks }
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -33,6 +50,8 @@ function renderScreen(session: unknown, decks: unknown[] = []) {
       </QueryClientProvider>
     </MemoryRouter>,
   )
+
+  return { deletedPaths }
 }
 
 describe('DeckListScreen', () => {
@@ -89,5 +108,65 @@ describe('DeckListScreen', () => {
 
     expect(await screen.findByText('英単語')).toBeTruthy()
     expect(screen.getByText('12枚')).toBeTruthy()
+  })
+
+  test('確認後にデモデッキを削除して一覧から消す', async () => {
+    const demoId = '019fd000-0000-7000-8000-000000000020'
+    const { deletedPaths } = renderScreen(
+      {
+        authenticated: true,
+        kind: 'guest',
+        expiresAt: '2026-11-19T12:00:00+09:00',
+        warning: 'Cookieを削除すると復元できません。',
+      },
+      [
+        {
+          id: demoId,
+          name: 'デモ',
+          description: 'ローマ字とひらがなの練習用です。',
+          newCardLimit: 20,
+          cardCount: 46,
+        },
+      ],
+    )
+    vi.stubGlobal('confirm', () => true)
+
+    expect(await screen.findByText('デモ')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'デモを削除' }))
+
+    expect(
+      await screen.findByText('最初の単語帳を作ってください。'),
+    ).toBeTruthy()
+    expect(screen.queryByText('デモ')).toBeNull()
+    expect(deletedPaths).toEqual([`/api/decks/${demoId}`])
+  })
+
+  test('削除確認を取り消した場合はデッキを残す', async () => {
+    const demoId = '019fd000-0000-7000-8000-000000000021'
+    const { deletedPaths } = renderScreen(
+      {
+        authenticated: true,
+        kind: 'guest',
+        expiresAt: '2026-11-19T12:00:00+09:00',
+        warning: 'Cookieを削除すると復元できません。',
+      },
+      [
+        {
+          id: demoId,
+          name: 'デモ',
+          description: 'ローマ字とひらがなの練習用です。',
+          newCardLimit: 20,
+          cardCount: 46,
+        },
+      ],
+    )
+    const confirm = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirm)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'デモを削除' }))
+
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(screen.getByText('デモ')).toBeTruthy()
+    expect(deletedPaths).toHaveLength(0)
   })
 })

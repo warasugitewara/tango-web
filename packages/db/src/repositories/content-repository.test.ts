@@ -34,6 +34,96 @@ describe('ContentRepository', () => {
   }
 
   describe('デッキ', () => {
+    test('デモデッキを五十音46枚で一度だけ作成する', async () => {
+      const owner = await insertGuestPrincipal()
+      const expectedPairs = [
+        ['a', 'あ'],
+        ['i', 'い'],
+        ['u', 'う'],
+        ['e', 'え'],
+        ['o', 'お'],
+        ['ka', 'か'],
+        ['ki', 'き'],
+        ['ku', 'く'],
+        ['ke', 'け'],
+        ['ko', 'こ'],
+        ['sa', 'さ'],
+        ['shi', 'し'],
+        ['su', 'す'],
+        ['se', 'せ'],
+        ['so', 'そ'],
+        ['ta', 'た'],
+        ['chi', 'ち'],
+        ['tsu', 'つ'],
+        ['te', 'て'],
+        ['to', 'と'],
+        ['na', 'な'],
+        ['ni', 'に'],
+        ['nu', 'ぬ'],
+        ['ne', 'ね'],
+        ['no', 'の'],
+        ['ha', 'は'],
+        ['hi', 'ひ'],
+        ['fu', 'ふ'],
+        ['he', 'へ'],
+        ['ho', 'ほ'],
+        ['ma', 'ま'],
+        ['mi', 'み'],
+        ['mu', 'む'],
+        ['me', 'め'],
+        ['mo', 'も'],
+        ['ya', 'や'],
+        ['yu', 'ゆ'],
+        ['yo', 'よ'],
+        ['ra', 'ら'],
+        ['ri', 'り'],
+        ['ru', 'る'],
+        ['re', 'れ'],
+        ['ro', 'ろ'],
+        ['wa', 'わ'],
+        ['wo', 'を'],
+        ['n', 'ん'],
+      ]
+
+      await repository.ensureDemoDeck(owner, now)
+      await repository.ensureDemoDeck(owner, now)
+
+      const [demo] = await repository.listDecks(owner)
+      expect(demo).toMatchObject({
+        name: 'デモ',
+        cardCount: 46,
+        newCardLimit: 20,
+      })
+      expect(demo?.description).toContain('ローマ字')
+      expect(demo).toBeDefined()
+      if (demo === undefined) {
+        return
+      }
+
+      const demoCards = await repository.listCards(owner, demo.id, 100, 0)
+      expect(demoCards.map(({ front, back }) => [front, back])).toEqual(
+        expectedPairs,
+      )
+    })
+
+    test('削除したデモデッキを再作成しない', async () => {
+      const owner = await insertGuestPrincipal()
+      await repository.ensureDemoDeck(owner, now)
+      const [demo] = await repository.listDecks(owner)
+
+      expect(demo).toBeDefined()
+      if (demo === undefined) {
+        return
+      }
+      expect(await repository.trashDeck(owner, demo.id, now)).toBe(true)
+
+      await repository.ensureDemoDeck(owner, now)
+
+      expect(await repository.listDecks(owner)).toHaveLength(0)
+      expect(await handle.db.select().from(schema.decks)).toHaveLength(1)
+      expect(await handle.db.select().from(schema.cards)).toHaveLength(46)
+    })
+
     test('作成したデッキを一覧で返す', async () => {
       const owner = await insertGuestPrincipal()
       const deck = await repository.createDeck(owner, { name: '英単語' }, now)

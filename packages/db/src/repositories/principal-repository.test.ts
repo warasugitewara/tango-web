@@ -9,6 +9,10 @@ import {
   type TestDatabaseHandle,
 } from '../test/database'
 import {
+  type ContentRepository,
+  createContentRepository,
+} from './content-repository'
+import {
   createPrincipalRepository,
   IdentityMergeKeyConflictError,
   type PrincipalRepository,
@@ -28,6 +32,7 @@ function createGate(): { wait: Promise<void>; open: () => void } {
 describe('PrincipalRepository', () => {
   let handle: TestDatabaseHandle | undefined
   let repository: PrincipalRepository
+  let contentRepository: ContentRepository
 
   function database(): TestDatabaseHandle {
     if (handle === undefined) {
@@ -39,6 +44,7 @@ describe('PrincipalRepository', () => {
   beforeAll(async () => {
     handle = await createTestDatabase()
     repository = createPrincipalRepository(database().db)
+    contentRepository = createContentRepository(database().db)
   })
 
   afterAll(async () => {
@@ -284,6 +290,48 @@ describe('PrincipalRepository', () => {
       .db.select({ id: schema.cards.id })
       .from(schema.cards)
     expect(remainingCards.map((row) => row.id)).toEqual([cardId])
+  })
+
+  test('双方のデモデッキを失わずにprincipalを統合する', async () => {
+    const now = new Date()
+    const userId = await insertFormalUser(now)
+    const formal = await repository.completeIdentity({
+      userId,
+      guestTokenHash: null,
+      mergeKey: uuidv7(),
+      now,
+    })
+    const input = guestInput(now)
+    const guest = await repository.createGuest(input)
+    await contentRepository.ensureDemoDeck(formal.principal.id, now)
+    await contentRepository.ensureDemoDeck(guest.principalId, now)
+
+    const merged = await repository.completeIdentity({
+      userId,
+      guestTokenHash: input.tokenHash,
+      mergeKey: uuidv7(),
+      now,
+    })
+
+    expect(merged.outcome).toBe('merged')
+    const storedDecks = await database()
+      .db.select({
+        principalId: schema.decks.principalId,
+        seedKey: schema.decks.seedKey,
+      })
+      .from(schema.decks)
+    expect(storedDecks).toHaveLength(2)
+    expect(
+      storedDecks.every((deck) => deck.principalId === formal.principal.id),
+    ).toBe(true)
+    expect(
+      storedDecks.filter((deck) => deck.seedKey === 'romaji-gojuon-v1'),
+    ).toHaveLength(1)
+    expect(storedDecks.filter((deck) => deck.seedKey === null)).toHaveLength(1)
+    expect(await database().db.select().from(schema.cards)).toHaveLength(92)
+
+    await contentRepository.ensureDemoDeck(formal.principal.id, now)
+    expect(await database().db.select().from(schema.decks)).toHaveLength(2)
   })
 
   test('returns the existing principal when completion is retried', async () => {

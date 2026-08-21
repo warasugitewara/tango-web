@@ -1,0 +1,2 @@
+ALTER TABLE "decks" ADD COLUMN "seed_key" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "decks_principal_seed_key_uidx" ON "decks" USING btree ("principal_id","seed_key") WHERE "decks"."seed_key" is not null;

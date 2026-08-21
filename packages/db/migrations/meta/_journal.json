@@ -57,6 +57,13 @@
       "when": 1787259194493,
       "tag": "0007_content_study",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787307349356,
+      "tag": "0008_luxuriant_omega_sentinel",
+      "breakpoints": true
     }
   ]
 }
