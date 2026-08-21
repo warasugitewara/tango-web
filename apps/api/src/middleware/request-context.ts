@@ -130,6 +130,15 @@ export function requestContext(
       // ゲストの学習データへ二度と到達できなくなる。
       if (error instanceof AppError && error.code === 'UNAUTHENTICATED') {
         clearGuestCookie(context, cookieSecure)
+
+        // ゲスト開始だけは、失効Cookieを匿名状態として扱い新規発行へ進める。
+        if (
+          context.req.method === 'POST' &&
+          context.req.path === '/api/guest/start'
+        ) {
+          await next()
+          return
+        }
       }
       throw error
     }

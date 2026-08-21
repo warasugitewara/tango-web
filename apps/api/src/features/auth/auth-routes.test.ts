@@ -217,6 +217,23 @@ describe('POST /api/guest/start', () => {
     expect(response.headers.get('set-cookie')).toBeNull()
   })
 
+  test('失効したゲストCookieでも新しいゲストを開始できる', async () => {
+    const response = await harness.app.request('/api/guest/start', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: `${GUEST_COOKIE_NAME}=${STALE_RAW_TOKEN}`,
+      },
+      body: JSON.stringify({ turnstileToken: 'valid-token' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(harness.startCalls).toHaveLength(1)
+    expect(response.headers.get('set-cookie')).toContain(
+      `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`,
+    )
+  })
+
   test('refuses to replace a live formal session', async () => {
     const formal = createHarness({
       formalSession: {
