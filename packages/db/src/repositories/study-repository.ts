@@ -90,7 +90,8 @@ export type SubmitReviewInput = {
   idempotencyKey: string
   now: Date
   learningDay: string
-  applied: Readonly<Record<Rating, AppliedSchedule>>
+  /** ロック済みの現行状態から4段階の適用候補を計算する。 */
+  apply(current: ScheduleRow): Readonly<Record<Rating, AppliedSchedule>>
   responseDurationMs?: number
 }
 
@@ -452,7 +453,12 @@ export function createStudyRepository(db: Database): StudyRepository {
           return { applied: false, schedule: toScheduleRow(current) }
         }
 
-        // 2. 所有者を含めて対象行をロックする。
+        // 2. セッション範囲と所有者を含めて対象行をロックする。
+        const scope = await resolveScope(tx, input.principalId, input.sessionId)
+        if (scope.length === 0) {
+          throw new CardNotFoundError()
+        }
+
         const locked = await tx
           .select({ schedule: cardSchedules })
           .from(cardSchedules)
@@ -462,6 +468,7 @@ export function createStudyRepository(db: Database): StudyRepository {
             and(
               eq(cardSchedules.cardId, input.cardId),
               eq(decks.principalId, input.principalId),
+              inArray(decks.id, [...scope]),
               isNull(decks.trashedAt),
               isNull(cards.trashedAt),
             ),
@@ -481,7 +488,7 @@ export function createStudyRepository(db: Database): StudyRepository {
         }
 
         // 4-5. 適用結果を書き戻し、バージョンを進める。
-        const next = input.applied[input.rating]
+        const next = input.apply(toScheduleRow(current))[input.rating]
         const nextVersion = current.version + 1
 
         await tx

@@ -1,4 +1,4 @@
-import type { ContentRepository } from '@tango/db'
+import type { ContentRepository, StudyRepository } from '@tango/db'
 import { Hono } from 'hono'
 import type { ActorResolver } from './features/auth/actor-resolver'
 import { createAuthRoutes } from './features/auth/auth-routes'
@@ -6,6 +6,9 @@ import type { Clock, GuestService } from './features/auth/guest-service'
 import type { IdentityCompletionService } from './features/auth/identity-completion-service'
 import { createOAuthErrorRoutes } from './features/auth/oauth-error-page'
 import { createContentRoutes } from './features/content/content-routes'
+import type { FsrsScheduler } from './features/study/fsrs-adapter'
+import { createStudyRoutes } from './features/study/study-routes'
+import { createStudyService } from './features/study/study-service'
 import { errorHandler } from './middleware/error-handler'
 import { jsonBodyGuard } from './middleware/json-body-guard'
 import {
@@ -25,6 +28,8 @@ export type AppDependencies = {
   cookieSecure: boolean
   /** 認証境界だけを検証する既存テストでは省略できる。 */
   contentRepository?: ContentRepository
+  studyRepository?: StudyRepository
+  fsrsScheduler?: FsrsScheduler
 }
 
 export function createApp(deps: AppDependencies) {
@@ -70,6 +75,18 @@ export function createApp(deps: AppDependencies) {
     app.route(
       '/api',
       createContentRoutes({ repository: deps.contentRepository }),
+    )
+  }
+
+  if (deps.studyRepository !== undefined && deps.fsrsScheduler !== undefined) {
+    app.route(
+      '/api',
+      createStudyRoutes({
+        service: createStudyService({
+          repository: deps.studyRepository,
+          scheduler: deps.fsrsScheduler,
+        }),
+      }),
     )
   }
 

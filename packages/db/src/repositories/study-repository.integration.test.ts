@@ -404,7 +404,7 @@ describe('StudyRepository', () => {
         idempotencyKey: randomUUID(),
         now: NOW,
         learningDay: LEARNING_DAY,
-        applied: applied(prepared.schedule, NOW),
+        apply: (current) => applied(current, NOW),
       })
 
       expect(outcome.applied).toBe(true)
@@ -419,6 +419,7 @@ describe('StudyRepository', () => {
     test('同じ冪等キーの再送は二重に採点されない', async () => {
       const prepared = await prepareReview()
       const idempotencyKey = randomUUID()
+      let applyCalls = 0
       const input = {
         principalId: prepared.principalId,
         sessionId: prepared.sessionId,
@@ -428,7 +429,10 @@ describe('StudyRepository', () => {
         idempotencyKey,
         now: NOW,
         learningDay: LEARNING_DAY,
-        applied: applied(prepared.schedule, NOW),
+        apply(current: ScheduleRow) {
+          applyCalls += 1
+          return applied(current, NOW)
+        },
       }
 
       const first = await repository.submitReview(input)
@@ -437,6 +441,7 @@ describe('StudyRepository', () => {
       expect(first.applied).toBe(true)
       expect(second.applied).toBe(false)
       expect(second.schedule.version).toBe(first.schedule.version)
+      expect(applyCalls).toBe(1)
 
       const events = await handle.db.select().from(schema.reviewEvents)
       expect(events).toHaveLength(1)
@@ -453,7 +458,7 @@ describe('StudyRepository', () => {
         idempotencyKey: randomUUID(),
         now: NOW,
         learningDay: LEARNING_DAY,
-        applied: applied(prepared.schedule, NOW),
+        apply: (current) => applied(current, NOW),
       })
 
       await expect(
@@ -466,7 +471,7 @@ describe('StudyRepository', () => {
           idempotencyKey: randomUUID(),
           now: NOW,
           learningDay: LEARNING_DAY,
-          applied: applied(prepared.schedule, NOW),
+          apply: (current) => applied(current, NOW),
         }),
       ).rejects.toBeInstanceOf(StudyStateConflictError)
 
@@ -488,12 +493,48 @@ describe('StudyRepository', () => {
           idempotencyKey: randomUUID(),
           now: NOW,
           learningDay: LEARNING_DAY,
-          applied: applied(prepared.schedule, NOW),
+          apply: (current) => applied(current, NOW),
         }),
       ).rejects.toThrow()
 
       const events = await handle.db.select().from(schema.reviewEvents)
       expect(events).toHaveLength(0)
+    })
+
+    test('選択セッションの範囲外カードへは投稿できない', async () => {
+      const principalId = await insertGuestPrincipal()
+      const selected = await seedDeck(principalId, 1)
+      const outside = await seedDeck(principalId, 1)
+      const selectedSessionId = await startSession(principalId, [
+        selected.deckId,
+      ])
+      const outsideSessionId = await startSession(principalId, [outside.deckId])
+      const outsideCard = await repository.nextCard({
+        principalId,
+        sessionId: outsideSessionId,
+        now: NOW,
+        learningDay: LEARNING_DAY,
+        initialSchedule: INITIAL_SEED,
+      })
+      if (outsideCard === null) {
+        throw new Error('範囲外カードを準備できませんでした。')
+      }
+
+      await expect(
+        repository.submitReview({
+          principalId,
+          sessionId: selectedSessionId,
+          cardId: outsideCard.cardId,
+          rating: 3,
+          expectedScheduleVersion: outsideCard.schedule.version,
+          idempotencyKey: randomUUID(),
+          now: NOW,
+          learningDay: LEARNING_DAY,
+          apply: (current) => applied(current, NOW),
+        }),
+      ).rejects.toThrow()
+
+      expect(await handle.db.select().from(schema.reviewEvents)).toHaveLength(0)
     })
 
     test('並行投稿はどちらか一方だけが適用される', async () => {
@@ -508,7 +549,7 @@ describe('StudyRepository', () => {
           idempotencyKey: randomUUID(),
           now: NOW,
           learningDay: LEARNING_DAY,
-          applied: applied(prepared.schedule, NOW),
+          apply: (current) => applied(current, NOW),
         })
 
       const results = await Promise.allSettled([submit(), submit()])
@@ -534,7 +575,7 @@ describe('StudyRepository', () => {
         idempotencyKey: randomUUID(),
         now: NOW,
         learningDay: LEARNING_DAY,
-        applied: applied(prepared.schedule, NOW),
+        apply: (current) => applied(current, NOW),
       })
 
       const [event] = await handle.db.select().from(schema.reviewEvents)

@@ -2,6 +2,7 @@ import {
   createContentRepository,
   createDatabase,
   createPrincipalRepository,
+  createStudyRepository,
 } from '@tango/db'
 import { createApp } from './app'
 import { isSecureCookieOrigin, loadEnv, readSecretFile } from './env'
@@ -15,6 +16,10 @@ import {
 } from './features/auth/guest-service'
 import { createIdentityCompletionService } from './features/auth/identity-completion-service'
 import { createTurnstileVerifier } from './features/auth/turnstile-client'
+import {
+  createFsrsScheduler,
+  DEFAULT_REQUEST_RETENTION,
+} from './features/study/fsrs-adapter'
 
 const env = loadEnv(Bun.env)
 
@@ -73,6 +78,8 @@ const app = createApp({
   authHandler: (request) => auth.handler(request),
   cookieSecure,
   contentRepository: createContentRepository(database.db),
+  studyRepository: createStudyRepository(database.db),
+  fsrsScheduler: createFsrsScheduler(DEFAULT_REQUEST_RETENTION),
 })
 
 const server = Bun.serve({ fetch: app.fetch })
