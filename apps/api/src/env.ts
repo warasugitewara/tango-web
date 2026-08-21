@@ -13,6 +13,11 @@ const POSTGRES_PROTOCOLS: ReadonlySet<string> = new Set([
   'postgresql:',
 ])
 
+const optionalNonEmptyString = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().min(1).optional(),
+)
+
 /**
  * PostgreSQLの接続URLとして解釈できるかどうかだけを判定する。
  * 判定結果には値を一切含めない。呼び出し側もキー名しか報告しない。
@@ -44,9 +49,18 @@ const environmentShape = {
    * PostgreSQLの接続URL。解釈できない値やプロトコル違いは起動前に落とす。
    * エラーメッセージには値を載せない（パスワードが含まれるため）。
    */
-  DATABASE_URL: z.string().min(1).refine(isPostgresConnectionUrl, {
-    message: 'postgres: または postgresql: のURLを指定してください。',
-  }),
+  DATABASE_URL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z
+      .string()
+      .min(1)
+      .refine(isPostgresConnectionUrl, {
+        message: 'postgres: または postgresql: のURLを指定してください。',
+      })
+      .optional(),
+  ),
+  /** 本番では接続URLを環境変数へ展開せず、Docker secretから読む。 */
+  DATABASE_URL_FILE: optionalNonEmptyString,
   /** ゲストトークンのHMACペッパーを格納したファイルのパス。値自体は環境変数に置かない。 */
   GUEST_TOKEN_PEPPER_FILE: z.string().min(1),
   TURNSTILE_SITE_KEY: z.string().min(1),
@@ -70,6 +84,17 @@ export const ENVIRONMENT_KEYS = Object.freeze(
 const environmentSchema = z
   .object(environmentShape)
   .superRefine((value, ctx) => {
+    if (
+      (value.DATABASE_URL === undefined) ===
+      (value.DATABASE_URL_FILE === undefined)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DATABASE_URL'],
+        message: 'DATABASE_URLかDATABASE_URL_FILEのどちらか一方が必要です。',
+      })
+    }
+
     // 本番のオリジンを取り違えると、Secure Cookieが外れたまま起動してしまう。
     // 設定ミスは起動前に落とす。
     if (
@@ -138,4 +163,21 @@ export async function readSecretFile(path: string): Promise<string> {
   }
 
   return secret
+}
+
+/** PostgreSQL接続URLを直接値またはsecret fileのどちらか一方から得る。 */
+export async function resolveDatabaseUrl(env: Env): Promise<string> {
+  if (env.DATABASE_URL !== undefined) {
+    return env.DATABASE_URL
+  }
+
+  const path = env.DATABASE_URL_FILE
+  if (path === undefined) {
+    throw new Error('DATABASE_URL_FILEを確認してください。')
+  }
+  const value = await readSecretFile(path)
+  if (!isPostgresConnectionUrl(value)) {
+    throw new Error('DATABASE_URL_FILEの内容を確認してください。')
+  }
+  return value
 }

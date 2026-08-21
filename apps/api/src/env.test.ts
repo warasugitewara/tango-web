@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
@@ -7,6 +8,7 @@ import {
   isSecureCookieOrigin,
   loadEnv,
   PRODUCTION_APP_ORIGIN,
+  resolveDatabaseUrl,
 } from './env'
 
 /** 検証だけを見るための最小構成。値はどれもテスト用のダミー。 */
@@ -95,6 +97,60 @@ describe('loadEnv', () => {
     const env = loadEnv({ ...baseEnv(), DATABASE_URL: databaseUrl })
 
     expect(env.DATABASE_URL).toBe(databaseUrl)
+  })
+
+  test('accepts DATABASE_URL_FILE instead of putting the secret URL in env', () => {
+    const source: Record<string, string | undefined> = baseEnv()
+    delete source.DATABASE_URL
+    source.DATABASE_URL_FILE = '/run/secrets/database_url'
+
+    const env = loadEnv(source)
+
+    expect(env.DATABASE_URL).toBeUndefined()
+    expect(env.DATABASE_URL_FILE).toBe('/run/secrets/database_url')
+  })
+
+  test('rejects ambiguous database URL sources', () => {
+    expect(() =>
+      loadEnv({
+        ...baseEnv(),
+        DATABASE_URL_FILE: '/run/secrets/database_url',
+      }),
+    ).toThrow(/DATABASE_URL/)
+  })
+
+  test('reads and validates the database URL from a secret file', async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), 'tango-database-url-'))
+    const path = resolve(directory, 'database_url')
+    const databaseUrl = 'postgresql://tango:dummy@tango-postgres:5432/tango'
+    try {
+      await writeFile(path, databaseUrl)
+      const source: Record<string, string | undefined> = baseEnv()
+      delete source.DATABASE_URL
+      source.DATABASE_URL_FILE = path
+
+      expect(await resolveDatabaseUrl(loadEnv(source))).toBe(databaseUrl)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  test('never leaks invalid database URL file contents', async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), 'tango-database-url-'))
+    const path = resolve(directory, 'database_url')
+    const secretMarker = 'dummy-secret-database-marker'
+    try {
+      await writeFile(path, `https://tango:${secretMarker}@example.test/tango`)
+      const source: Record<string, string | undefined> = baseEnv()
+      delete source.DATABASE_URL
+      source.DATABASE_URL_FILE = path
+
+      await expect(resolveDatabaseUrl(loadEnv(source))).rejects.not.toThrow(
+        secretMarker,
+      )
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test.each([

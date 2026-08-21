@@ -5,7 +5,12 @@ import {
   createStudyRepository,
 } from '@tango/db'
 import { createApp } from './app'
-import { isSecureCookieOrigin, loadEnv, readSecretFile } from './env'
+import {
+  isSecureCookieOrigin,
+  loadEnv,
+  readSecretFile,
+  resolveDatabaseUrl,
+} from './env'
 import { createActorResolver } from './features/auth/actor-resolver'
 import { createAuth } from './features/auth/better-auth'
 import { createFormalSessionReader } from './features/auth/formal-session-reader'
@@ -24,12 +29,14 @@ import {
 const env = loadEnv(Bun.env)
 
 const [
+  databaseUrl,
   guestTokenPepper,
   turnstileSecret,
   betterAuthSecret,
   googleClientSecret,
   githubClientSecret,
 ] = await Promise.all([
+  resolveDatabaseUrl(env),
   readSecretFile(env.GUEST_TOKEN_PEPPER_FILE),
   readSecretFile(env.TURNSTILE_SECRET_FILE),
   readSecretFile(env.BETTER_AUTH_SECRET_FILE),
@@ -39,7 +46,7 @@ const [
 
 const cookieSecure = isSecureCookieOrigin(env)
 
-const database = createDatabase(env.DATABASE_URL)
+const database = createDatabase(databaseUrl)
 const repository = createPrincipalRepository(database.db)
 const clock = createSystemClock()
 const tokenCodec = createGuestTokenCodec(guestTokenPepper)
@@ -80,6 +87,7 @@ const app = createApp({
   contentRepository: createContentRepository(database.db),
   studyRepository: createStudyRepository(database.db),
   fsrsScheduler: createFsrsScheduler(DEFAULT_REQUEST_RETENTION),
+  spaRoot: 'apps/web/dist',
 })
 
 const server = Bun.serve({ fetch: app.fetch })

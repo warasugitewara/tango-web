@@ -1,5 +1,9 @@
+import { readFile, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { ContentRepository, StudyRepository } from '@tango/db'
+import { AppError } from '@tango/shared'
 import { Hono } from 'hono'
+import { serveStatic } from 'hono/serve-static'
 import type { ActorResolver } from './features/auth/actor-resolver'
 import { createAuthRoutes } from './features/auth/auth-routes'
 import type { Clock, GuestService } from './features/auth/guest-service'
@@ -30,6 +34,30 @@ export type AppDependencies = {
   contentRepository?: ContentRepository
   studyRepository?: StudyRepository
   fsrsScheduler?: FsrsScheduler
+  /** 本番ビルドで配信するSPA成果物。省略時はAPI専用で起動する。 */
+  spaRoot?: string
+}
+
+function spaStatic(root: string, path?: string) {
+  return serveStatic<AppEnv>({
+    root,
+    ...(path === undefined ? {} : { path }),
+    join,
+    async getContent(filePath) {
+      try {
+        return await readFile(filePath)
+      } catch {
+        return null
+      }
+    },
+    async isDir(filePath) {
+      try {
+        return (await stat(filePath)).isDirectory()
+      } catch {
+        return false
+      }
+    },
+  })
 }
 
 export function createApp(deps: AppDependencies) {
@@ -88,6 +116,23 @@ export function createApp(deps: AppDependencies) {
         }),
       }),
     )
+  }
+
+  // 未知のAPIをindex.htmlへ落とさず、既存のJSONエラー契約を維持する。
+  app.all('/api', () => {
+    throw new AppError('NOT_FOUND')
+  })
+  app.all('/api/*', () => {
+    throw new AppError('NOT_FOUND')
+  })
+  app.all('/health/*', () => {
+    throw new AppError('NOT_FOUND')
+  })
+
+  // 既存ルートの後ろに置き、GETの画面遷移だけをSPAへフォールバックする。
+  if (deps.spaRoot !== undefined) {
+    app.get('*', spaStatic(deps.spaRoot))
+    app.get('*', spaStatic(deps.spaRoot, 'index.html'))
   }
 
   return app

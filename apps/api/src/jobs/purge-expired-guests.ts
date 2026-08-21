@@ -2,7 +2,7 @@ import type { PrincipalRepository } from '@tango/db'
 import { createDatabase, createPrincipalRepository } from '@tango/db'
 import { AppError, parseJstInstant, toSafeErrorName } from '@tango/shared'
 import { v7 as uuidv7 } from 'uuid'
-import { loadEnv } from '../env'
+import { loadEnv, resolveDatabaseUrl } from '../env'
 import { type Clock, createSystemClock } from '../features/auth/guest-service'
 
 /** ログの相関に使うjob識別子。 */
@@ -121,7 +121,7 @@ export function toPurgeFailureLog(error: unknown): PurgeFailureLog {
 async function main(): Promise<void> {
   const env = loadEnv(process.env)
   const clock = resolveClock(env.APP_ENV, process.argv.slice(2))
-  const database = createDatabase(env.DATABASE_URL, { max: 1 })
+  const database = createDatabase(await resolveDatabaseUrl(env), { max: 1 })
 
   try {
     const summary = await purgeExpiredGuests({

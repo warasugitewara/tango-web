@@ -1,0 +1,116 @@
+name: tango-pre-release
+
+services:
+  tango-postgres:
+    image: postgres:18.4-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tango
+      POSTGRES_USER: tango
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      TZ: Asia/Tokyo
+      PGTZ: Asia/Tokyo
+    secrets:
+      - postgres_password
+    volumes:
+      - tango-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U tango -d tango']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  tango-app:
+    build:
+      context: ../..
+      dockerfile: infra/pre-release/Dockerfile
+      args:
+        TURNSTILE_PUBLIC_SITE_ID: ${TURNSTILE_SITE_KEY:?TURNSTILE_SITE_KEY is required}
+    restart: unless-stopped
+    command:
+      - sh
+      - -ec
+      - bun run db:migrate && exec bun apps/api/dist/index.js
+    environment:
+      APP_ENV: production
+      APP_ORIGIN: https://tango.warasugi.com
+      DATABASE_URL_FILE: /run/secrets/database_url
+      GUEST_TOKEN_PEPPER_FILE: /run/secrets/guest_token_pepper
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:?TURNSTILE_SITE_KEY is required}
+      TURNSTILE_SECRET_FILE: /run/secrets/turnstile_secret
+      BETTER_AUTH_SECRET_FILE: /run/secrets/better_auth_secret
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID is required}
+      GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google_client_secret
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?GITHUB_CLIENT_ID is required}
+      GITHUB_CLIENT_SECRET_FILE: /run/secrets/github_client_secret
+      TZ: Asia/Tokyo
+    secrets:
+      - database_url
+      - guest_token_pepper
+      - turnstile_secret
+      - better_auth_secret
+      - google_client_secret
+      - github_client_secret
+    expose:
+      - '3000'
+    depends_on:
+      tango-postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - fetch('http://127.0.0.1:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.7.3
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/cloudflare_tunnel_token
+    secrets:
+      - cloudflare_tunnel_token
+    depends_on:
+      tango-app:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  database_url:
+    file: ${DATABASE_URL_SECRET_FILE:?DATABASE_URL_SECRET_FILE is required}
+  postgres_password:
+    file: ${POSTGRES_PASSWORD_SECRET_FILE:?POSTGRES_PASSWORD_SECRET_FILE is required}
+  guest_token_pepper:
+    file: ${GUEST_TOKEN_PEPPER_SECRET_FILE:?GUEST_TOKEN_PEPPER_SECRET_FILE is required}
+  turnstile_secret:
+    file: ${TURNSTILE_SECRET_FILE:?TURNSTILE_SECRET_FILE is required}
+  better_auth_secret:
+    file: ${BETTER_AUTH_SECRET_FILE:?BETTER_AUTH_SECRET_FILE is required}
+  google_client_secret:
+    file: ${GOOGLE_CLIENT_SECRET_FILE:?GOOGLE_CLIENT_SECRET_FILE is required}
+  github_client_secret:
+    file: ${GITHUB_CLIENT_SECRET_FILE:?GITHUB_CLIENT_SECRET_FILE is required}
+  cloudflare_tunnel_token:
+    file: ${CLOUDFLARE_TUNNEL_TOKEN_FILE:?CLOUDFLARE_TUNNEL_TOKEN_FILE is required}
+
+volumes:
+  tango-pgdata:
+    name: tango-pre-release-pgdata

@@ -2,8 +2,21 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
-    // DBを使うテストは単一のテスト用インスタンスをTRUNCATEで初期化するため、
-    // ファイル並列実行を無効にして相互の初期化が衝突しないようにする。
-    fileParallelism: false,
+    projects: [
+      {
+        test: {
+          name: 'node',
+          environment: 'node',
+          include: [
+            'apps/api/**/*.test.ts',
+            'packages/**/*.test.ts',
+            'tests/**/*.test.ts',
+          ],
+          // 統合テストは同じ専用DBをTRUNCATEするため、ファイル間では直列にする。
+          fileParallelism: false,
+        },
+      },
+      './apps/web/vitest.config.mts',
+    ],
   },
 })
