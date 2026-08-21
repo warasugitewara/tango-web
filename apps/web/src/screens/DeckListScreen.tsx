@@ -8,6 +8,7 @@ export function DeckListScreen() {
   const queryClient = useQueryClient()
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
   const [deckName, setDeckName] = useState('')
+  const [signInError, setSignInError] = useState<string | null>(null)
   const session = useQuery({
     queryKey: ['session'],
     queryFn: () => apiClient.session(),
@@ -23,6 +24,15 @@ export function DeckListScreen() {
       await queryClient.invalidateQueries({ queryKey: ['session'] })
     },
   })
+  const signOut = useMutation({
+    mutationFn: () => apiClient.signOut(),
+    onSuccess: async () => {
+      // セッションとデッキの両方が別人のものへ変わるため、まとめて捨てる。
+      await queryClient.invalidateQueries({ queryKey: ['session'] })
+      await queryClient.invalidateQueries({ queryKey: ['decks'] })
+    },
+  })
+
   const createDeck = useMutation({
     mutationFn: (name: string) => apiClient.createDeck({ name }),
     onSuccess: async () => {
@@ -39,6 +49,27 @@ export function DeckListScreen() {
   const receiveToken = useCallback((token: string | null) => {
     setTurnstileToken(token)
   }, [])
+
+  /**
+   * サインインはブラウザから開始する。
+   * Better Authが張る署名済みstate Cookieがブラウザに残らないと、
+   * コールバックで突き合わせに失敗する。
+   */
+  const startSignIn = (provider: 'google' | 'github') => {
+    setSignInError(null)
+    apiClient
+      .signInUrl(provider)
+      .then((url) => {
+        window.location.href = url
+      })
+      .catch((error: unknown) => {
+        setSignInError(
+          error instanceof Error
+            ? error.message
+            : 'ログインを開始できませんでした。',
+        )
+      })
+  }
 
   if (session.isPending) {
     return <main className="shell">読み込み中…</main>
@@ -90,8 +121,27 @@ export function DeckListScreen() {
       </header>
 
       {session.data.kind === 'guest' ? (
-        <aside className="guest-warning">{session.data.warning}</aside>
-      ) : null}
+        <aside className="guest-warning">
+          <p>{session.data.warning}</p>
+          <p>ログインすると、別のブラウザや端末へ学習データを引き継げます。</p>
+          <div className="inline-form">
+            <button type="button" onClick={() => startSignIn('google')}>
+              Googleでログイン
+            </button>
+            <button type="button" onClick={() => startSignIn('github')}>
+              GitHubでログイン
+            </button>
+          </div>
+          {signInError === null ? null : <p role="alert">{signInError}</p>}
+        </aside>
+      ) : (
+        <aside className="account-bar">
+          <p>{session.data.user.name}</p>
+          <button type="button" onClick={() => signOut.mutate()}>
+            ログアウト
+          </button>
+        </aside>
+      )}
 
       <form
         className="deck-create"

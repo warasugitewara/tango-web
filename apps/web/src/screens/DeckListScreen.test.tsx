@@ -62,7 +62,10 @@ describe('DeckListScreen', () => {
     expect(screen.queryByRole('button', { name: 'デッキを作成' })).toBeNull()
   })
 
-  test('ログイン導線を一切出さない', async () => {
+  test('ゲストでも単語帳の見出しを出す', async () => {
+    // プレリリースでは「ログイン導線を一切出さない」ことを固定していたが、
+    // 本番ではCookie喪失によるデータ消失を塞ぐため導線を出す方針へ変えた。
+    // 導線そのものの検証は「ログイン導線」のテスト群が受け持つ。
     renderScreen({
       authenticated: true,
       kind: 'guest',
@@ -71,9 +74,6 @@ describe('DeckListScreen', () => {
     })
 
     expect(await screen.findByRole('heading', { name: '単語帳' })).toBeTruthy()
-    expect(screen.queryByText(/Google/)).toBeNull()
-    expect(screen.queryByText(/GitHub/)).toBeNull()
-    expect(screen.queryByText(/ログイン/)).toBeNull()
   })
 
   test('Cookie削除でデータが戻せない旨を常時表示する', async () => {
@@ -168,5 +168,54 @@ describe('DeckListScreen', () => {
     expect(confirm).toHaveBeenCalledOnce()
     expect(screen.getByText('デモ')).toBeTruthy()
     expect(deletedPaths).toHaveLength(0)
+  })
+})
+
+describe('ログイン導線', () => {
+  const guestSession = {
+    authenticated: true,
+    kind: 'guest',
+    expiresAt: '2026-11-19T12:00:00+09:00',
+    warning: 'ゲストの学習データはこのブラウザだけに紐づきます。',
+  }
+
+  const userSession = {
+    authenticated: true,
+    kind: 'user',
+    user: { id: 'user-1', name: 'テスト太郎', image: null },
+    providers: ['google'],
+  }
+
+  test('ゲストにはログインの導線を出す', async () => {
+    renderScreen(guestSession)
+
+    expect(await screen.findByRole('button', { name: /Google/ })).toBeDefined()
+    expect(screen.getByRole('button', { name: /GitHub/ })).toBeDefined()
+  })
+
+  test('ゲストには失われる理由と対処を並べて示す', async () => {
+    renderScreen(guestSession)
+
+    // 警告だけを出して打つ手を示さない状態にしない。
+    expect(
+      await screen.findByText(/このブラウザだけに紐づきます/),
+    ).toBeDefined()
+    expect(screen.getByText(/引き継/)).toBeDefined()
+  })
+
+  test('正式ユーザーにはログイン導線を出さず名前を出す', async () => {
+    renderScreen(userSession)
+
+    expect(await screen.findByText('テスト太郎')).toBeDefined()
+    expect(screen.queryByRole('button', { name: /Google/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /GitHub/ })).toBeNull()
+  })
+
+  test('正式ユーザーにはログアウトを出す', async () => {
+    renderScreen(userSession)
+
+    expect(
+      await screen.findByRole('button', { name: 'ログアウト' }),
+    ).toBeDefined()
   })
 })

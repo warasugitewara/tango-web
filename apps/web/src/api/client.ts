@@ -281,6 +281,34 @@ export const apiClient = {
       }),
     )
   },
+  /**
+   * サインインの開始URLを取得する。
+   * Better Authはサインイン応答で署名済みstate Cookieを張り、
+   * コールバックで突き合わせる。必ずブラウザから呼ぶこと。
+   */
+  async signInUrl(provider: 'google' | 'github'): Promise<string> {
+    const body = await request('/api/auth/sign-in/social', {
+      method: 'POST',
+      body: JSON.stringify({ provider, callbackURL: '/auth/complete' }),
+    })
+    if (!isRecord(body) || typeof body.url !== 'string') {
+      throw new ApiClientError(
+        'INVALID_RESPONSE',
+        'ログインを開始できませんでした。',
+      )
+    }
+    return body.url
+  },
+  /** ゲストから正式アカウントへの引き継ぎを確定する。 */
+  async completeIdentity(mergeKey: string): Promise<void> {
+    await request('/api/identity/complete', {
+      method: 'POST',
+      body: JSON.stringify({ mergeKey }),
+    })
+  },
+  async signOut(): Promise<void> {
+    await request('/api/auth/sign-out', { method: 'POST', body: '{}' })
+  },
   async listDecks(): Promise<readonly DeckSummary[]> {
     const body = await request('/api/decks')
     if (!isRecord(body) || !Array.isArray(body.decks)) {
