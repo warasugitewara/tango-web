@@ -20,6 +20,7 @@ import {
   requestContext,
   requestId,
 } from './middleware/request-context'
+import { securityHeaders } from './middleware/security-headers'
 
 export type AppDependencies = {
   clock: Clock
@@ -65,6 +66,8 @@ export function createApp(deps: AppDependencies) {
 
   app.onError(errorHandler())
   app.use('*', requestId())
+  // 認証やルーティングより先に付ける。エラー応答にも同じ制限を適用するため。
+  app.use('*', securityHeaders({ secureOrigin: deps.cookieSecure }))
 
   app.route('/', createOAuthErrorRoutes())
 
