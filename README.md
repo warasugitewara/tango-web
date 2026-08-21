@@ -76,7 +76,7 @@ bun apps/api/src/jobs/purge-expired-guests.ts
 
 ## プレリリース配置
 
-`infra/pre-release` は Debian 12/13 LXC 上の Docker Compose を想定する。構成はアプリ、PostgreSQL、Cloudflare Tunnel の3サービスで、ホストへポートを公開しない。起動時にアプリコンテナがマイグレーションを1回適用してからAPIを開始し、同じオリジンでSPAも配信する。
+`infra/pre-release` は Debian 12/13 LXC 上の Docker Compose を想定する。構成はアプリとPostgreSQLの2サービスで、Cloudflare TunnelはLXCのsystemdサービスとして動かす。アプリはホストの`127.0.0.1:3000`だけへ公開する。起動時にアプリコンテナがマイグレーションを1回適用してからAPIを開始し、同じオリジンでSPAも配信する。
 
 ### 1. 資格情報を用意する
 
@@ -93,9 +93,7 @@ install -d -m 700 /etc/tango/secrets
 - `guest_token_pepper`: 十分に長いランダム値
 - `turnstile_secret` / `better_auth_secret`
 - `google_client_secret` / `github_client_secret`
-- `cloudflare_tunnel_token`
-
-Cloudflare側では `tango.warasugi.com` のTunnel公開ホスト名を `http://tango-app:3000` へ向ける。
+Cloudflare側では `tango.warasugi.com` のTunnel公開ホスト名を `http://localhost:3000` へ向ける。
 
 ### 2. 構成を検証して起動する
 
@@ -105,7 +103,7 @@ docker compose --env-file .env -f compose.yml up -d --build --wait
 docker compose --env-file .env -f compose.yml ps
 ```
 
-目的はPostgreSQLを外部公開せず、Cloudflare Tunnelだけを入口にすること。利点はLXC側のポート開放が不要な点。リスクはTunnelまたは単一LXCの停止でサービス全体が停止する点と、起動時DDLが長引く可能性がある点。更新前にバックアップを取得し、マイグレーションログを確認する。
+目的はPostgreSQLを外部公開せず、ホスト版Cloudflare Tunnelだけを入口にすること。利点はLXC側の外部向けポート開放が不要な点。リスクはTunnelまたは単一LXCの停止でサービス全体が停止する点と、起動時DDLが長引く可能性がある点。更新前にバックアップを取得し、マイグレーションログを確認する。
 
 ### 3. 1日1回バックアップする
 

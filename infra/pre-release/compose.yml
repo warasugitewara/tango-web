@@ -54,8 +54,8 @@ services:
       - better_auth_secret
       - google_client_secret
       - github_client_secret
-    expose:
-      - '3000'
+    ports:
+      - '127.0.0.1:3000:3000'
     depends_on:
       tango-postgres:
         condition: service_healthy
@@ -75,24 +75,6 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  cloudflared:
-    image: cloudflare/cloudflared:2026.7.3
-    restart: unless-stopped
-    command:
-      - tunnel
-      - --no-autoupdate
-      - run
-      - --token-file
-      - /run/secrets/cloudflare_tunnel_token
-    secrets:
-      - cloudflare_tunnel_token
-    depends_on:
-      tango-app:
-        condition: service_healthy
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-
 secrets:
   database_url:
     file: ${DATABASE_URL_SECRET_FILE:?DATABASE_URL_SECRET_FILE is required}
@@ -108,9 +90,6 @@ secrets:
     file: ${GOOGLE_CLIENT_SECRET_FILE:?GOOGLE_CLIENT_SECRET_FILE is required}
   github_client_secret:
     file: ${GITHUB_CLIENT_SECRET_FILE:?GITHUB_CLIENT_SECRET_FILE is required}
-  cloudflare_tunnel_token:
-    file: ${CLOUDFLARE_TUNNEL_TOKEN_FILE:?CLOUDFLARE_TUNNEL_TOKEN_FILE is required}
-
 volumes:
   tango-pgdata:
     name: tango-pre-release-pgdata
