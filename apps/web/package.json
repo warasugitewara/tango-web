@@ -9,14 +9,20 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@tanstack/react-query": "5.101.4",
     "@tango/shared": "workspace:*",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
+    "react-router": "8.3.0",
+    "rehype-sanitize": "6.0.0"
   },
   "devDependencies": {
+    "@testing-library/react": "16.3.2",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "6.0.5",
+    "jsdom": "30.0.1",
     "typescript": "7.0.2",
     "vite": "8.2.0"
   }

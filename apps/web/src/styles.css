@@ -1,0 +1,276 @@
+:root {
+  color: #17252b;
+  background: #edf3f2;
+  font-family:
+    "Yu Gothic UI", "Yu Gothic", "Hiragino Kaku Gothic ProN", sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    linear-gradient(90deg, rgba(49, 92, 117, 0.04) 1px, transparent 1px) 0 0 /
+    32px 32px,
+    #edf3f2;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 3px solid #ed6a4a;
+  outline-offset: 3px;
+}
+
+.shell {
+  width: min(1040px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 48px 0 72px;
+}
+
+.welcome-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.welcome-card {
+  width: min(620px, 100%);
+  padding: clamp(32px, 7vw, 72px);
+  background: #f9fbfa;
+  border: 1px solid #c8d6d3;
+  border-left: 12px solid #315c75;
+  box-shadow: 0 24px 70px rgba(23, 37, 43, 0.12);
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: #315c75;
+  font:
+    700 0.74rem / 1.2 ui-monospace,
+    "Cascadia Mono",
+    monospace;
+  letter-spacing: 0.16em;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 18px;
+  font-size: clamp(2rem, 5vw, 4rem);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
+.lead {
+  max-width: 35rem;
+  color: #4d6268;
+  line-height: 1.9;
+}
+
+.primary-button,
+.inline-form button,
+.study-link {
+  border: 0;
+  background: #315c75;
+  color: white;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.primary-button {
+  width: 100%;
+  margin-top: 20px;
+  padding: 15px 20px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.turnstile-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.page-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #b7c8c5;
+}
+
+.page-header h1 {
+  margin-bottom: 0;
+}
+
+.study-link {
+  padding: 12px 18px;
+}
+
+.guest-warning {
+  margin: 24px 0;
+  padding: 14px 18px;
+  color: #7f2f20;
+  background: #fff0eb;
+  border-left: 5px solid #ed6a4a;
+  line-height: 1.7;
+}
+
+.deck-create {
+  margin: 36px 0;
+  padding: 24px;
+  background: rgba(249, 251, 250, 0.82);
+  border: 1px solid #c8d6d3;
+}
+
+.deck-create label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.inline-form input {
+  min-width: 0;
+  padding: 12px 14px;
+  color: #17252b;
+  background: white;
+  border: 1px solid #aebfbc;
+}
+
+.inline-form button {
+  padding: 12px 18px;
+}
+
+.deck-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.deck-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px 32px;
+  overflow: hidden;
+  padding: 24px 24px 20px 34px;
+  background: #f9fbfa;
+  border: 1px solid #c8d6d3;
+  transition:
+    transform 150ms ease,
+    border-color 150ms ease;
+}
+
+.deck-card:hover {
+  transform: translateY(-2px);
+  border-color: #7895a0;
+}
+
+.deck-tab {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 9px;
+  background: #315c75;
+}
+
+.deck-card h2 {
+  margin-bottom: 8px;
+  font-size: 1.25rem;
+}
+
+.deck-card p,
+.deck-meta {
+  color: #607278;
+}
+
+.deck-meta,
+.deck-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.deck-meta {
+  font:
+    650 0.83rem / 1.3 ui-monospace,
+    "Cascadia Mono",
+    monospace;
+}
+
+.deck-actions a {
+  color: #254f68;
+  font-weight: 700;
+}
+
+.empty-state,
+.error-panel,
+.form-error {
+  color: #7f2f20;
+}
+
+@media (max-width: 640px) {
+  .shell {
+    width: min(100% - 24px, 1040px);
+    padding-top: 28px;
+  }
+
+  .page-header,
+  .inline-form,
+  .deck-card {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .study-link {
+    text-align: center;
+  }
+
+  .inline-form {
+    display: grid;
+  }
+
+  .deck-card {
+    gap: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deck-card {
+    transition: none;
+  }
+}

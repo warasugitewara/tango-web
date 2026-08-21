@@ -1,13 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-
-function App() {
-  return (
-    <main>
-      <h1>Tango</h1>
-    </main>
-  )
-}
+import { App } from './app/App'
+import './styles.css'
 
 const container = document.getElementById('root')
 
