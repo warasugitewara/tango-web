@@ -172,4 +172,77 @@ describe('content routes', () => {
       },
     })
   })
+
+  test('妥当なJSONを全件まとめて取り込む', async () => {
+    const imported: Array<readonly { front: string; back: string }[]> = []
+    const repository: ContentRepository = {
+      ...createRepository(),
+      async createCards(_principalId, _deckId, inputs) {
+        imported.push(inputs)
+        return inputs.length
+      },
+    }
+    const response = await createHarness(repository).request(
+      `/api/decks/${uuidv7()}/import`,
+      {
+        method: 'POST',
+        headers: {
+          ...guestHeaders(),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          format: 'json',
+          payload: JSON.stringify({
+            schema: 'tango.content',
+            version: 1,
+            cards: [
+              { front: '表1', back: '裏1' },
+              { front: '表2', back: '裏2' },
+            ],
+          }),
+        }),
+      },
+    )
+
+    expect(response.status).toBe(201)
+    expect(await response.json()).toEqual({ created: 2 })
+    expect(imported).toEqual([
+      [
+        { front: '表1', back: '裏1' },
+        { front: '表2', back: '裏2' },
+      ],
+    ])
+  })
+
+  test('不正な取り込みはリポジトリを呼ばず全体を拒否する', async () => {
+    let createCalls = 0
+    const repository: ContentRepository = {
+      ...createRepository(),
+      async createCards() {
+        createCalls += 1
+        return 0
+      },
+    }
+    const response = await createHarness(repository).request(
+      `/api/decks/${uuidv7()}/import`,
+      {
+        method: 'POST',
+        headers: {
+          ...guestHeaders(),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          format: 'json',
+          payload: JSON.stringify({
+            schema: 'tango.content',
+            version: 1,
+            cards: [{ front: '', back: '裏' }],
+          }),
+        }),
+      },
+    )
+
+    expect(response.status).toBe(400)
+    expect(createCalls).toBe(0)
+  })
 })

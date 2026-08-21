@@ -7,6 +7,7 @@ import {
   deckCreateSchema,
   deckUpdateSchema,
   formatJst,
+  importRequestSchema,
 } from '@tango/shared'
 import { Hono } from 'hono'
 import { z } from 'zod'
@@ -14,6 +15,7 @@ import {
   type AppEnv,
   requireServiceContext,
 } from '../../middleware/request-context'
+import { parseImportPayload } from './import-parser'
 
 const idParamsSchema = z.object({ deckId: z.uuidv7() }).strict()
 const cardIdParamsSchema = z.object({ cardId: z.uuidv7() }).strict()
@@ -160,6 +162,25 @@ export function createContentRoutes(options: {
           throw new AppError('NOT_FOUND')
         }
         return context.json({ card: toCardView(card) }, 201)
+      },
+    )
+    .post(
+      '/decks/:deckId/import',
+      zValidator('param', idParamsSchema, validationFailure),
+      zValidator('json', importRequestSchema, validationFailure),
+      async (context) => {
+        const serviceContext = requireServiceContext(context)
+        const cards = parseImportPayload(context.req.valid('json'))
+        const created = await repository.createCards(
+          serviceContext.actor.principalId,
+          context.req.valid('param').deckId,
+          cards,
+          toDate(serviceContext.now),
+        )
+        if (created === 0) {
+          throw new AppError('NOT_FOUND')
+        }
+        return context.json({ created }, 201)
       },
     )
     .patch(
