@@ -1,4 +1,8 @@
-import type { DeckCreateInput } from '@tango/shared'
+import type {
+  CardContentInput,
+  DeckCreateInput,
+  ImportRequest,
+} from '@tango/shared'
 
 export type SessionView =
   | { authenticated: false }
@@ -21,6 +25,16 @@ export type DeckSummary = {
   description: string | null
   newCardLimit: number
   cardCount: number
+}
+
+export type CardRecord = {
+  id: string
+  deckId: string
+  front: string
+  back: string
+  contentHash: string
+  createdAt: string
+  updatedAt: string
 }
 
 export class ApiClientError extends Error {
@@ -111,6 +125,21 @@ function parseDeck(value: unknown): DeckSummary {
   }
 }
 
+function parseCard(value: unknown): CardRecord {
+  if (!isRecord(value)) {
+    throw new ApiClientError('INVALID_RESPONSE', 'カードを読み込めません。')
+  }
+  return {
+    id: requiredString(value, 'id'),
+    deckId: requiredString(value, 'deckId'),
+    front: requiredString(value, 'front'),
+    back: requiredString(value, 'back'),
+    contentHash: requiredString(value, 'contentHash'),
+    createdAt: requiredString(value, 'createdAt'),
+    updatedAt: requiredString(value, 'updatedAt'),
+  }
+}
+
 async function request(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(path, {
     ...init,
@@ -122,7 +151,7 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
       ...init?.headers,
     },
   })
-  const body: unknown = await response.json()
+  const body: unknown = response.status === 204 ? null : await response.json()
   if (!response.ok) {
     if (isRecord(body) && isRecord(body.error)) {
       const code = body.error.code
@@ -164,5 +193,51 @@ export const apiClient = {
       throw new ApiClientError('INVALID_RESPONSE', 'デッキを作成できません。')
     }
     return parseDeck(body.deck)
+  },
+  async listCards(deckId: string): Promise<readonly CardRecord[]> {
+    const body = await request(`/api/decks/${deckId}/cards`)
+    if (!isRecord(body) || !Array.isArray(body.cards)) {
+      throw new ApiClientError('INVALID_RESPONSE', 'カードを読み込めません。')
+    }
+    return body.cards.map(parseCard)
+  },
+  async createCard(
+    deckId: string,
+    input: CardContentInput,
+  ): Promise<CardRecord> {
+    const body = await request(`/api/decks/${deckId}/cards`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+    if (!isRecord(body)) {
+      throw new ApiClientError('INVALID_RESPONSE', 'カードを作成できません。')
+    }
+    return parseCard(body.card)
+  },
+  async updateCard(
+    cardId: string,
+    input: CardContentInput,
+  ): Promise<CardRecord> {
+    const body = await request(`/api/cards/${cardId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    })
+    if (!isRecord(body)) {
+      throw new ApiClientError('INVALID_RESPONSE', 'カードを更新できません。')
+    }
+    return parseCard(body.card)
+  },
+  async deleteCard(cardId: string): Promise<void> {
+    await request(`/api/cards/${cardId}`, { method: 'DELETE' })
+  },
+  async importCards(deckId: string, input: ImportRequest): Promise<number> {
+    const body = await request(`/api/decks/${deckId}/import`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+    if (!isRecord(body) || typeof body.created !== 'number') {
+      throw new ApiClientError('INVALID_RESPONSE', 'カードを取り込めません。')
+    }
+    return body.created
   },
 }

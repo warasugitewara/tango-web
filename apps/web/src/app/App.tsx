@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router'
+import { DeckDetailScreen } from '../screens/DeckDetailScreen'
 import { DeckListScreen } from '../screens/DeckListScreen'
 
 const queryClient = new QueryClient({
@@ -21,10 +22,7 @@ export function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<DeckListScreen />} />
-          <Route
-            path="/decks/:deckId"
-            element={<PendingScreen title="カード" />}
-          />
+          <Route path="/decks/:deckId" element={<DeckDetailScreen />} />
           <Route path="/study" element={<PendingScreen title="学習" />} />
         </Routes>
       </BrowserRouter>

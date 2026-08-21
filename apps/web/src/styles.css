@@ -239,6 +239,139 @@ button:disabled {
   color: #7f2f20;
 }
 
+.detail-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.detail-header a {
+  color: #315c75;
+}
+
+.detail-header h1 {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+.content-panel {
+  margin-bottom: 18px;
+  padding: 24px;
+  background: #f9fbfa;
+  border: 1px solid #c8d6d3;
+}
+
+.card-form,
+.import-form,
+.card-edit form {
+  display: grid;
+  gap: 14px;
+}
+
+.card-form {
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+}
+
+.card-form label,
+.import-form label,
+.card-edit label {
+  display: grid;
+  gap: 7px;
+  font-weight: 700;
+}
+
+textarea,
+select {
+  width: 100%;
+  padding: 10px 12px;
+  color: #17252b;
+  background: white;
+  border: 1px solid #aebfbc;
+  font: inherit;
+}
+
+textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.card-form button,
+.import-form button,
+.card-edit button {
+  padding: 11px 16px;
+  border: 0;
+  background: #315c75;
+  color: white;
+  font-weight: 700;
+}
+
+.card-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.content-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 42px 1fr 1fr auto;
+  gap: 20px;
+  align-items: start;
+  padding: 20px;
+  background: #f9fbfa;
+  border: 1px solid #c8d6d3;
+}
+
+.card-number,
+.card-face > span {
+  color: #607278;
+  font:
+    700 0.72rem / 1.4 ui-monospace,
+    "Cascadia Mono",
+    monospace;
+  letter-spacing: 0.12em;
+}
+
+.card-markdown > :last-child,
+.card-markdown p {
+  margin-bottom: 0;
+}
+
+.card-controls {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+}
+
+.card-edit summary {
+  color: #315c75;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.card-edit[open] {
+  position: absolute;
+  z-index: 2;
+  right: 32px;
+  width: min(460px, calc(100vw - 48px));
+  padding: 18px;
+  background: white;
+  border: 1px solid #7895a0;
+  box-shadow: 0 18px 48px rgba(23, 37, 43, 0.18);
+}
+
+.danger-button {
+  padding: 0;
+  color: #9b3d2a;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-weight: 700;
+}
+
 @media (max-width: 640px) {
   .shell {
     width: min(100% - 24px, 1040px);
@@ -246,12 +379,18 @@ button:disabled {
   }
 
   .page-header,
+  .detail-header,
   .inline-form,
   .deck-card {
     grid-template-columns: 1fr;
   }
 
   .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .detail-header {
     flex-direction: column;
     align-items: stretch;
   }
@@ -266,6 +405,11 @@ button:disabled {
 
   .deck-card {
     gap: 14px;
+  }
+
+  .card-form,
+  .content-card {
+    grid-template-columns: 1fr;
   }
 }
 
