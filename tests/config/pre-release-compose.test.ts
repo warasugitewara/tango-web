@@ -16,6 +16,10 @@ describe('pre-release compose contract', () => {
     expect(compose).not.toContain("expose:\n      - '3000'")
   })
 
+  test('pins the non-root app identity used to own file secrets', () => {
+    expect(compose).toContain("user: '1000:1000'")
+  })
+
   test('leaves the Cloudflare Tunnel under host systemd management', () => {
     expect(compose).not.toMatch(/^ {2}cloudflared:/m)
     expect(compose).not.toContain('cloudflare_tunnel_token')

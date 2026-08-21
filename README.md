@@ -86,7 +86,27 @@ cp .env.example .env
 install -d -m 700 /etc/tango/secrets
 ```
 
-`.env` には公開してよいTurnstile site keyとOAuth client ID、各secret fileの絶対パスだけを書く。secret fileは所有者だけが読めるよう `chmod 600` にする。
+`.env` には公開してよいTurnstile site keyとOAuth client ID、各secret fileの絶対パスだけを書く。アプリは固定したUID/GID 1000で動くため、アプリ用secretだけを同じ所有者にし、親ディレクトリはroot以外が探索できない状態を維持する。PostgreSQL用パスワードはroot所有のままにする。
+
+```sh
+chown 1000:1000 \
+  /etc/tango/secrets/database_url \
+  /etc/tango/secrets/guest_token_pepper \
+  /etc/tango/secrets/turnstile_secret \
+  /etc/tango/secrets/better_auth_secret \
+  /etc/tango/secrets/google_client_secret \
+  /etc/tango/secrets/github_client_secret
+chmod 400 \
+  /etc/tango/secrets/database_url \
+  /etc/tango/secrets/guest_token_pepper \
+  /etc/tango/secrets/turnstile_secret \
+  /etc/tango/secrets/better_auth_secret \
+  /etc/tango/secrets/google_client_secret \
+  /etc/tango/secrets/github_client_secret
+chown root:root /etc/tango/secrets/postgres_password
+chmod 600 /etc/tango/secrets/postgres_password
+chmod 700 /etc/tango/secrets
+```
 
 - `database_url`: `postgresql://tango:<URLエンコード済みパスワード>@tango-postgres:5432/tango`
 - `postgres_password`: 上記URLと同じ生パスワード

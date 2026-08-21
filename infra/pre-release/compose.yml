@@ -30,6 +30,7 @@ services:
       args:
         TURNSTILE_PUBLIC_SITE_ID: ${TURNSTILE_SITE_KEY:?TURNSTILE_SITE_KEY is required}
     restart: unless-stopped
+    user: '1000:1000'
     command:
       - sh
       - -ec
