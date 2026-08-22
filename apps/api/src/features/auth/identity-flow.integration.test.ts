@@ -18,6 +18,7 @@ import {
 import { v7 as uuidv7 } from 'uuid'
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { createApp } from '../../app'
+import { mutationHeaders } from '../../test/request-headers'
 import type { FormalSession } from './actor-resolver'
 import { createActorResolver } from './actor-resolver'
 import {
@@ -71,7 +72,7 @@ async function insertUser(userId: string): Promise<void> {
 async function startGuest(): Promise<{ response: Response; rawToken: string }> {
   const response = await app.request('/api/guest/start', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: mutationHeaders([], { 'content-type': 'application/json' }),
     body: JSON.stringify({ turnstileToken: 'valid-token' }),
   })
   const rawToken = readGuestCookie(response)
@@ -87,13 +88,10 @@ async function completeIdentity(
   guestRawToken: string | null,
   mergeKey: string,
 ): Promise<Response> {
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-  }
-
-  if (guestRawToken !== null) {
-    headers.cookie = `${GUEST_COOKIE_NAME}=${guestRawToken}`
-  }
+  const headers = mutationHeaders(
+    guestRawToken === null ? [] : [`${GUEST_COOKIE_NAME}=${guestRawToken}`],
+    { 'content-type': 'application/json' },
+  )
 
   return app.request('/api/identity/complete', {
     method: 'POST',
@@ -126,6 +124,7 @@ beforeAll(async () => {
     }),
     authHandler: async () => new Response(null, { status: 204 }),
     cookieSecure: true,
+    appOrigin: 'https://tango.warasugi.com',
   })
 })
 
@@ -362,10 +361,9 @@ describe('identity flow', () => {
     // 同じブラウザから再度開始しても、既存のゲストをそのまま返す。
     const again = await app.request('/api/guest/start', {
       method: 'POST',
-      headers: {
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${rawToken}`], {
         'content-type': 'application/json',
-        cookie: `${GUEST_COOKIE_NAME}=${rawToken}`,
-      },
+      }),
       body: JSON.stringify({ turnstileToken: 'valid-token' }),
     })
 

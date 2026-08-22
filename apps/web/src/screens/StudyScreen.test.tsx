@@ -81,7 +81,11 @@ afterEach(() => {
 describe('StudyScreen', () => {
   test('答えを見るまで裏を表示せず、評価に次回間隔を表示する', async () => {
     const initial = studyView({ id: CARD_1, front: '表1', back: '裏1' })
-    renderScreen(async () => jsonResponse(initial, 201))
+    renderScreen(async (input) =>
+      routeOf(input) === '/api/security/csrf'
+        ? jsonResponse({ csrfToken: 'test-token' })
+        : jsonResponse(initial, 201),
+    )
 
     expect(await screen.findByText('表1')).toBeTruthy()
     expect(screen.queryByText('裏1')).toBeNull()
@@ -101,6 +105,10 @@ describe('StudyScreen', () => {
     })
     renderScreen(async (input, init) => {
       const route = routeOf(input)
+      // CSRFトークンの発行はクライアントが自動で行う。
+      if (route === '/api/security/csrf') {
+        return jsonResponse({ csrfToken: 'test-token' })
+      }
       if (route === '/api/study/reviews' && init?.method === 'POST') {
         return pendingReview
       }
@@ -126,6 +134,10 @@ describe('StudyScreen', () => {
     let getCount = 0
     renderScreen(async (input, init) => {
       const route = routeOf(input)
+      // CSRFトークンの発行はクライアントが自動で行う。
+      if (route === '/api/security/csrf') {
+        return jsonResponse({ csrfToken: 'test-token' })
+      }
       if (route === '/api/study/reviews' && init?.method === 'POST') {
         return jsonResponse(
           {
@@ -158,6 +170,10 @@ describe('StudyScreen', () => {
     let reviewCount = 0
     renderScreen(async (input, init) => {
       const route = routeOf(input)
+      // CSRFトークンの発行はクライアントが自動で行う。
+      if (route === '/api/security/csrf') {
+        return jsonResponse({ csrfToken: 'test-token' })
+      }
       if (route === '/api/study/reviews' && init?.method === 'POST') {
         reviewCount += 1
         bodies.push(

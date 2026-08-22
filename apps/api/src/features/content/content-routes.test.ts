@@ -4,6 +4,7 @@ import { AppError } from '@tango/shared'
 import { v7 as uuidv7 } from 'uuid'
 import { describe, expect, test } from 'vitest'
 import { createApp } from '../../app'
+import { mutationHeaders } from '../../test/request-headers'
 import type { ActorResolver } from '../auth/actor-resolver'
 import { GUEST_COOKIE_NAME, type GuestService } from '../auth/guest-service'
 
@@ -99,12 +100,14 @@ function createHarness(repository: ContentRepository = createRepository()) {
     },
     authHandler: async () => new Response(null, { status: 204 }),
     cookieSecure: true,
+    appOrigin: 'https://tango.warasugi.com',
     contentRepository: repository,
   })
 }
 
 function guestHeaders(): Record<string, string> {
-  return { cookie: `${GUEST_COOKIE_NAME}=${RAW_TOKEN}` }
+  // 状態を変える要求にはOriginと二重送信トークンが要る。
+  return mutationHeaders([`${GUEST_COOKIE_NAME}=${RAW_TOKEN}`])
 }
 
 describe('content routes', () => {

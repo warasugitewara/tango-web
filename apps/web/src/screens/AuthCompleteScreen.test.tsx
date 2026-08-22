@@ -27,6 +27,14 @@ function renderScreen(respond: () => Response): { calls: CompleteCall[] } {
         'https://tango.test',
       ).pathname
 
+      // CSRFトークンの発行はクライアントが自動で行う。
+      if (path === '/api/security/csrf') {
+        return new Response(JSON.stringify({ csrfToken: 'test-token' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+
       if (path === '/api/identity/complete') {
         const body: unknown =
           typeof init?.body === 'string' ? JSON.parse(init.body) : null

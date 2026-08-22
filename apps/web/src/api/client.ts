@@ -244,17 +244,61 @@ function parseStudySession(value: unknown): StudySessionView {
   }
 }
 
-async function request(path: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(path, {
+/** 二重送信トークンを載せるヘッダ。サーバの検査名と揃える。 */
+const CSRF_HEADER = 'X-Tango-CSRF'
+
+/** 取得済みのトークン。タブの生存中は使い回す。 */
+let csrfToken: string | null = null
+
+async function fetchCsrfToken(): Promise<string> {
+  const response = await fetch('/api/security/csrf', {
+    credentials: 'same-origin',
+  })
+
+  if (!response.ok) {
+    throw new ApiClientError(
+      'INTERNAL_ERROR',
+      '通信の準備に失敗しました。画面を再読み込みしてください。',
+    )
+  }
+
+  const body: unknown = await response.json()
+
+  if (!isRecord(body) || typeof body.csrfToken !== 'string') {
+    throw new ApiClientError(
+      'INVALID_RESPONSE',
+      '通信の準備に失敗しました。画面を再読み込みしてください。',
+    )
+  }
+
+  csrfToken = body.csrfToken
+  return body.csrfToken
+}
+
+/** 変更を伴う要求かどうか。安全なメソッドはトークンを必要としない。 */
+function isMutation(method: string | undefined): boolean {
+  return method !== undefined && method.toUpperCase() !== 'GET'
+}
+
+async function send(
+  path: string,
+  init: RequestInit | undefined,
+  token: string | null,
+): Promise<Response> {
+  return fetch(path, {
     ...init,
     credentials: 'same-origin',
     headers: {
       ...(init?.body === undefined
         ? {}
         : { 'content-type': 'application/json' }),
+      ...(token === null ? {} : { [CSRF_HEADER]: token }),
       ...init?.headers,
     },
   })
+}
+
+async function toResult(response: Response): Promise<unknown> {
   const body: unknown = response.status === 204 ? null : await response.json()
   if (!response.ok) {
     if (isRecord(body) && isRecord(body.error)) {
@@ -267,6 +311,26 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
     throw new ApiClientError('INTERNAL_ERROR', '通信に失敗しました。')
   }
   return body
+}
+
+async function request(path: string, init?: RequestInit): Promise<unknown> {
+  const mutating = isMutation(init?.method)
+
+  if (!mutating) {
+    return toResult(await send(path, init, null))
+  }
+
+  const token = csrfToken ?? (await fetchCsrfToken())
+  const response = await send(path, init, token)
+
+  // Cookieの期限切れや別タブでの再発行でトークンが古くなることがある。
+  // 一度だけ取り直して再送する。再送は同じ内容なので副作用は増えない。
+  if (response.status === 403) {
+    const refreshed = await fetchCsrfToken()
+    return toResult(await send(path, init, refreshed))
+  }
+
+  return toResult(response)
 }
 
 export const apiClient = {

@@ -51,6 +51,7 @@ function createHarness() {
     },
     authHandler: async () => new Response(null, { status: 204 }),
     cookieSecure: true,
+    appOrigin: 'https://tango.warasugi.com',
     spaRoot,
   })
 }

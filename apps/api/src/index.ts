@@ -84,6 +84,7 @@ const app = createApp({
   }),
   authHandler: (request) => auth.handler(request),
   cookieSecure,
+  appOrigin: env.APP_ORIGIN,
   contentRepository: createContentRepository(database.db),
   studyRepository: createStudyRepository(database.db),
   fsrsScheduler: createFsrsScheduler(DEFAULT_REQUEST_RETENTION),

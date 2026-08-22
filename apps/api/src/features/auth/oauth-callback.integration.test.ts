@@ -201,6 +201,7 @@ beforeAll(async () => {
     identityCompletionService,
     authHandler: (request) => requireAuth().handler(request),
     cookieSecure: true,
+    appOrigin: 'https://tango.warasugi.com',
   })
 })
 

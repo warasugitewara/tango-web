@@ -2,6 +2,7 @@ import { AppError, parseJstInstant } from '@tango/shared'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createApp } from '../app'
 import type { GuestService } from '../features/auth/guest-service'
+import { mutationHeaders } from '../test/request-headers'
 
 const NOW = parseJstInstant('2026-08-01T10:00:00+09:00')
 
@@ -52,6 +53,7 @@ function createAppThatFailsOnStart(failure: unknown) {
     },
     authHandler: async () => new Response(null, { status: 204 }),
     cookieSecure: true,
+    appOrigin: 'https://tango.warasugi.com',
   })
 }
 
@@ -87,10 +89,10 @@ describe('errorHandler', () => {
 
     return app.request('/api/guest/start', {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        cookie: `better-auth.session_token=${SECRET_COOKIE_VALUE}`,
-      },
+      headers: mutationHeaders(
+        [`better-auth.session_token=${SECRET_COOKIE_VALUE}`],
+        { 'content-type': 'application/json' },
+      ),
       body: JSON.stringify({
         turnstileToken: 'valid-token',
         front: CARD_FRONT_TEXT,

@@ -5,6 +5,7 @@ import { type ApiErrorEnvelope, AppError } from '@tango/shared'
 import { v7 as uuidv7 } from 'uuid'
 import { describe, expect, test, vi } from 'vitest'
 import { createApp } from '../../app'
+import { mutationHeaders } from '../../test/request-headers'
 import type { ActorResolver, FormalSession } from './actor-resolver'
 import { createAuth, createBetterAuthOptions } from './better-auth'
 import { GUEST_COOKIE_NAME, type GuestService } from './guest-service'
@@ -121,10 +122,11 @@ function createHarness(
       authRequests.push(new URL(request.url).pathname)
       return new Response('{"ok":true}', {
         status: 200,
-        headers: { 'content-type': 'application/json' },
+        headers: mutationHeaders([], { 'content-type': 'application/json' }),
       })
     },
     cookieSecure: true,
+    appOrigin: 'https://tango.warasugi.com',
   })
 
   return { app, authRequests, completions }
@@ -357,7 +359,7 @@ describe('/api/auth/*', () => {
 
     const response = await harness.app.request('/api/auth/sign-in/social', {
       method: 'POST',
-      headers: { cookie: `${GUEST_COOKIE_NAME}=${STALE_RAW_TOKEN}` },
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${STALE_RAW_TOKEN}`]),
     })
 
     expect(response.status).toBe(200)
@@ -371,7 +373,7 @@ describe('POST /api/identity/complete', () => {
 
     const response = await harness.app.request('/api/identity/complete', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: JSON.stringify({ mergeKey: uuidv7() }),
     })
 
@@ -384,7 +386,7 @@ describe('POST /api/identity/complete', () => {
 
     const response = await harness.app.request('/api/identity/complete', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: JSON.stringify({ mergeKey: 'not-a-uuid' }),
     })
 
@@ -398,7 +400,7 @@ describe('POST /api/identity/complete', () => {
 
     const response = await harness.app.request('/api/identity/complete', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: JSON.stringify({ mergeKey: randomUUID() }),
     })
 
@@ -411,10 +413,9 @@ describe('POST /api/identity/complete', () => {
 
     const response = await harness.app.request('/api/identity/complete', {
       method: 'POST',
-      headers: {
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`], {
         'content-type': 'application/json',
-        cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`,
-      },
+      }),
       body: JSON.stringify({ mergeKey: uuidv7() }),
     })
 
@@ -445,10 +446,9 @@ describe('POST /api/identity/complete', () => {
 
     const response = await harness.app.request('/api/identity/complete', {
       method: 'POST',
-      headers: {
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`], {
         'content-type': 'application/json',
-        cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`,
-      },
+      }),
       body: JSON.stringify({ mergeKey: uuidv7() }),
     })
 
@@ -464,7 +464,7 @@ describe('POST /api/identity/complete', () => {
 
     const response = await harness.app.request('/api/identity/complete', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: JSON.stringify({ mergeKey: uuidv7() }),
     })
 

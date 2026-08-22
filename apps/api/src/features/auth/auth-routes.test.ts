@@ -7,6 +7,7 @@ import {
 import { beforeEach, describe, expect, test } from 'vitest'
 import { createApp } from '../../app'
 import { MAX_REQUEST_BODY_BYTES } from '../../middleware/json-body-guard'
+import { mutationHeaders } from '../../test/request-headers'
 import type { ActorResolver, FormalSession } from './actor-resolver'
 import {
   GUEST_COOKIE_NAME,
@@ -109,6 +110,7 @@ function createHarness(options: {
     },
     authHandler: async () => new Response(null, { status: 204 }),
     cookieSecure: options.cookieSecure ?? true,
+    appOrigin: 'https://tango.warasugi.com',
   })
 
   return { app, startCalls }
@@ -124,7 +126,7 @@ describe('POST /api/guest/start', () => {
   test('sets a hardened guest cookie and returns the risk notice', async () => {
     const response = await harness.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: JSON.stringify({ turnstileToken: 'valid-token' }),
     })
 
@@ -153,7 +155,11 @@ describe('POST /api/guest/start', () => {
     const local = createHarness({ cookieSecure: false })
     const response = await local.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders(
+        [],
+        { 'content-type': 'application/json' },
+        false,
+      ),
       body: JSON.stringify({ turnstileToken: 'valid-token' }),
     })
 
@@ -166,7 +172,7 @@ describe('POST /api/guest/start', () => {
     const invalid = createHarness({ turnstileValid: false })
     const response = await invalid.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: JSON.stringify({ turnstileToken: 'invalid-token' }),
     })
 
@@ -186,7 +192,7 @@ describe('POST /api/guest/start', () => {
   test('rejects a malformed body before calling Turnstile', async () => {
     const response = await harness.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: JSON.stringify({ turnstileToken: 42 }),
     })
 
@@ -198,10 +204,9 @@ describe('POST /api/guest/start', () => {
     // 上書きすると旧principalの学習データへ到達する唯一の生トークンを失う。
     const response = await harness.app.request('/api/guest/start', {
       method: 'POST',
-      headers: {
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`], {
         'content-type': 'application/json',
-        cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`,
-      },
+      }),
       body: JSON.stringify({ turnstileToken: 'valid-token' }),
     })
 
@@ -220,10 +225,9 @@ describe('POST /api/guest/start', () => {
   test('失効したゲストCookieでも新しいゲストを開始できる', async () => {
     const response = await harness.app.request('/api/guest/start', {
       method: 'POST',
-      headers: {
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${STALE_RAW_TOKEN}`], {
         'content-type': 'application/json',
-        cookie: `${GUEST_COOKIE_NAME}=${STALE_RAW_TOKEN}`,
-      },
+      }),
       body: JSON.stringify({ turnstileToken: 'valid-token' }),
     })
 
@@ -246,7 +250,7 @@ describe('POST /api/guest/start', () => {
 
     const response = await formal.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: JSON.stringify({ turnstileToken: 'valid-token' }),
     })
 
@@ -270,7 +274,7 @@ describe('GET /api/session', () => {
   test('reports an active guest with its expiry and warning', async () => {
     const { app } = createHarness({})
     const response = await app.request('/api/session', {
-      headers: { cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}` },
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`]),
     })
 
     expect(response.status).toBe(200)
@@ -305,7 +309,7 @@ describe('GET /api/session', () => {
   test('clears a revoked or expired guest cookie and reports UNAUTHENTICATED', async () => {
     const { app } = createHarness({})
     const response = await app.request('/api/session', {
-      headers: { cookie: `${GUEST_COOKIE_NAME}=${STALE_RAW_TOKEN}` },
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${STALE_RAW_TOKEN}`]),
     })
 
     expect(response.status).toBe(401)
@@ -322,7 +326,7 @@ describe('GET /api/session', () => {
     // DB側だけ延長してCookieを据え置くと、作成から90日でブラウザが先にCookieを捨てる。
     const { app } = createHarness({ guestRefreshed: true })
     const response = await app.request('/api/session', {
-      headers: { cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}` },
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`]),
     })
 
     expect(response.status).toBe(200)
@@ -339,7 +343,7 @@ describe('GET /api/session', () => {
   test('leaves the guest cookie untouched when nothing was extended', async () => {
     const { app } = createHarness({})
     const response = await app.request('/api/session', {
-      headers: { cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}` },
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`]),
     })
 
     expect(response.status).toBe(200)
@@ -356,7 +360,7 @@ describe('GET /api/session', () => {
       },
     })
     const response = await app.request('/api/session', {
-      headers: { cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}` },
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`]),
     })
 
     expect(await response.json()).toMatchObject({
@@ -376,7 +380,7 @@ describe('request body boundaries', () => {
   test('normalizes malformed JSON into VALIDATION_FAILED', async () => {
     const response = await harness.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: '{"turnstileToken":',
     })
 
@@ -391,7 +395,7 @@ describe('request body boundaries', () => {
   test('normalizes an empty body into VALIDATION_FAILED', async () => {
     const response = await harness.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
     })
 
     expect(response.status).toBe(400)
@@ -404,7 +408,7 @@ describe('request body boundaries', () => {
   test('rejects a body sent without a JSON content type', async () => {
     const response = await harness.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'text/plain' },
+      headers: mutationHeaders([], { 'content-type': 'text/plain' }),
       body: JSON.stringify({ turnstileToken: 'valid-token' }),
     })
 
@@ -419,7 +423,9 @@ describe('request body boundaries', () => {
   test('accepts a JSON content type that carries a charset', async () => {
     const response = await harness.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: mutationHeaders([], {
+        'content-type': 'application/json; charset=utf-8',
+      }),
       body: JSON.stringify({ turnstileToken: 'valid-token' }),
     })
 
@@ -434,7 +440,7 @@ describe('request body boundaries', () => {
 
     const response = await harness.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: oversized,
     })
 
@@ -454,7 +460,7 @@ describe('request body boundaries', () => {
 
     const response = await harness.app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: JSON.stringify({ turnstileToken: filler }),
     })
 
@@ -523,10 +529,11 @@ describe('request context and error handling', () => {
       },
       authHandler: async () => new Response(null, { status: 204 }),
       cookieSecure: true,
+      appOrigin: 'https://tango.warasugi.com',
     })
 
     const response = await app.request('/api/session', {
-      headers: { cookie: `${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}` },
+      headers: mutationHeaders([`${GUEST_COOKIE_NAME}=${VALID_RAW_TOKEN}`]),
     })
 
     expect(response.status).toBe(500)
@@ -567,11 +574,12 @@ describe('request context and error handling', () => {
       },
       authHandler: async () => new Response(null, { status: 204 }),
       cookieSecure: true,
+      appOrigin: 'https://tango.warasugi.com',
     })
 
     const response = await app.request('/api/guest/start', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
       body: JSON.stringify({ turnstileToken: 'valid-token' }),
     })
 

@@ -13,6 +13,7 @@ import { createContentRoutes } from './features/content/content-routes'
 import type { FsrsScheduler } from './features/study/fsrs-adapter'
 import { createStudyRoutes } from './features/study/study-routes'
 import { createStudyService } from './features/study/study-service'
+import { createCsrfRoutes, originGuard } from './middleware/csrf'
 import { errorHandler } from './middleware/error-handler'
 import { jsonBodyGuard } from './middleware/json-body-guard'
 import {
@@ -31,6 +32,8 @@ export type AppDependencies = {
   authHandler: (request: Request) => Promise<Response>
   /** 本番のHTTPS配信では true。ローカルのHTTP検証でのみ false にする。 */
   cookieSecure: boolean
+  /** 状態を変える要求に対して完全一致で要求する公開オリジン。 */
+  appOrigin: string
   /** 認証境界だけを検証する既存テストでは省略できる。 */
   contentRepository?: ContentRepository
   studyRepository?: StudyRepository
@@ -75,6 +78,22 @@ export function createApp(deps: AppDependencies) {
   // 失効したゲストCookieが残っていてもログインを妨げないようにするため。
   app.on(['GET', 'POST'], '/api/auth/*', (context) =>
     deps.authHandler(context.req.raw),
+  )
+
+  // トークン発行は状態を変えないため、Origin検査より前に置く。
+  app.route(
+    '/api/security',
+    createCsrfRoutes({ secureOrigin: deps.cookieSecure }),
+  )
+
+  // Better Authは自前のorigin/CSRF保護を持つ。上の委譲で既に処理済みのため
+  // ここへは到達しない。マウント順による除外であり、パス一致では除外しない。
+  app.use(
+    '/api/*',
+    originGuard({
+      appOrigin: deps.appOrigin,
+      secureOrigin: deps.cookieSecure,
+    }),
   )
 
   // Better Authは自前のボディ検証を持つため、その委譲より後ろに置く。

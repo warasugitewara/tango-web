@@ -9,6 +9,7 @@ import { AppError } from '@tango/shared'
 import { describe, expect, test } from 'vitest'
 import { z } from 'zod'
 import { createApp } from '../../app'
+import { mutationHeaders } from '../../test/request-headers'
 import type { ActorResolver } from '../auth/actor-resolver'
 import { GUEST_COOKIE_NAME, type GuestService } from '../auth/guest-service'
 import type { FsrsScheduler, SchedulerState } from './fsrs-adapter'
@@ -155,15 +156,16 @@ function createHarness(repository: StudyRepository = createRepository()) {
     },
     authHandler: async () => new Response(null, { status: 204 }),
     cookieSecure: true,
+    appOrigin: 'https://tango.warasugi.com',
     studyRepository: repository,
     fsrsScheduler: createScheduler(),
   })
 }
 
-const headers = {
-  cookie: `${GUEST_COOKIE_NAME}=${RAW_TOKEN}`,
+// 状態を変える要求にはOriginと二重送信トークンが要る。
+const headers = mutationHeaders([`${GUEST_COOKIE_NAME}=${RAW_TOKEN}`], {
   'content-type': 'application/json',
-}
+})
 
 describe('study routes', () => {
   test('セッション開始時に現在カードと残り枚数を返す', async () => {
