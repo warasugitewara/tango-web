@@ -41,6 +41,14 @@ export type CardRecord = {
   updatedAt: string
 }
 
+/** デッキ一覧に添える当日の残り枚数。 */
+export type DeckQueue = {
+  deckId: string
+  remainingReview: number
+  remainingLearning: number
+  remainingNew: number
+}
+
 /** カード一覧の1ページ。`total` はゴミ箱を除いたデッキ内の総数。 */
 export type CardPage = {
   cards: readonly CardRecord[]
@@ -156,6 +164,18 @@ function parseDeck(value: unknown): DeckSummary {
     description,
     newCardLimit: value.newCardLimit,
     cardCount: value.cardCount,
+  }
+}
+
+function parseDeckQueue(value: unknown): DeckQueue {
+  if (!isRecord(value)) {
+    throw new ApiClientError('INVALID_RESPONSE', '残り枚数を読み込めません。')
+  }
+  return {
+    deckId: requiredString(value, 'deckId'),
+    remainingReview: requiredNumber(value, 'remainingReview'),
+    remainingLearning: requiredNumber(value, 'remainingLearning'),
+    remainingNew: requiredNumber(value, 'remainingNew'),
   }
 }
 
@@ -386,6 +406,14 @@ export const apiClient = {
       throw new ApiClientError('INVALID_RESPONSE', 'デッキを読み込めません。')
     }
     return body.decks.map(parseDeck)
+  },
+  /** デッキごとの当日残数。デッキ一覧と突き合わせて表示する。 */
+  async listDeckQueues(): Promise<readonly DeckQueue[]> {
+    const body = await request('/api/study/decks')
+    if (!isRecord(body) || !Array.isArray(body.decks)) {
+      throw new ApiClientError('INVALID_RESPONSE', '残り枚数を読み込めません。')
+    }
+    return body.decks.map(parseDeckQueue)
   },
   async createDeck(input: DeckCreateInput): Promise<DeckSummary> {
     const body = await request('/api/decks', {

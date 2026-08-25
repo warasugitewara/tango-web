@@ -362,6 +362,115 @@ describe('StudyRepository', () => {
     })
   })
 
+  describe('デッキごとの残り枚数', () => {
+    test('復習と新規をデッキごとに数え、他人のデッキは含めない', async () => {
+      const owner = await insertGuestPrincipal()
+      const other = await insertGuestPrincipal()
+      const first = await seedDeck(owner, 3)
+      const second = await seedDeck(owner, 2)
+      await seedDeck(other, 5)
+      const [dueCardId] = first.cardIds
+      expect(dueCardId).toBeDefined()
+      if (dueCardId === undefined) {
+        return
+      }
+
+      await handle.db.insert(schema.cardSchedules).values({
+        cardId: dueCardId,
+        dueAt: new Date(NOW.getTime() - 60_000),
+        stability: 1,
+        difficulty: 5,
+        state: 'review',
+        schedulerVersion: SCHEDULER_VERSION,
+        requestRetention: 0.9,
+      })
+
+      const counts = await repository.countDeckQueues({
+        principalId: owner,
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      })
+
+      expect(counts).toHaveLength(2)
+      expect(counts.find((deck) => deck.deckId === first.deckId)).toEqual({
+        deckId: first.deckId,
+        review: 1,
+        learning: 0,
+        new: 2,
+      })
+      expect(counts.find((deck) => deck.deckId === second.deckId)).toEqual({
+        deckId: second.deckId,
+        review: 0,
+        learning: 0,
+        new: 2,
+      })
+    })
+
+    test('新規の残りは1日の上限を超えない', async () => {
+      const owner = await insertGuestPrincipal()
+      const { deckId } = await seedDeck(owner, 5, 2)
+
+      const counts = await repository.countDeckQueues({
+        principalId: owner,
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      })
+
+      expect(counts.find((deck) => deck.deckId === deckId)?.new).toBe(2)
+    })
+
+    test('当日すでに出した新規は残りから引く', async () => {
+      const owner = await insertGuestPrincipal()
+      const { deckId } = await seedDeck(owner, 5, 2)
+      const sessionId = await startSession(owner)
+      const card = await repository.nextCard({
+        principalId: owner,
+        sessionId,
+        now: NOW,
+        learningDay: LEARNING_DAY,
+        initialSchedule: INITIAL_SEED,
+      })
+      expect(card).not.toBeNull()
+      if (card === null) {
+        return
+      }
+
+      await repository.submitReview({
+        principalId: owner,
+        sessionId,
+        cardId: card.cardId,
+        rating: 3,
+        expectedScheduleVersion: card.schedule.version,
+        idempotencyKey: randomUUID(),
+        now: NOW,
+        learningDay: LEARNING_DAY,
+        apply: (current) => applied(current, NOW),
+      })
+
+      const counts = await repository.countDeckQueues({
+        principalId: owner,
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      })
+
+      expect(counts.find((deck) => deck.deckId === deckId)?.new).toBe(1)
+    })
+
+    test('削除したデッキは数えない', async () => {
+      const owner = await insertGuestPrincipal()
+      const { deckId } = await seedDeck(owner, 2)
+      await content.trashDeck(owner, deckId, NOW)
+
+      const counts = await repository.countDeckQueues({
+        principalId: owner,
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      })
+
+      expect(counts).toEqual([])
+    })
+  })
+
   describe('レビュー取引', () => {
     async function prepareReview(): Promise<{
       principalId: string

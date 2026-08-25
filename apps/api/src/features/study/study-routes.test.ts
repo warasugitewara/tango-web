@@ -96,6 +96,9 @@ function createRepository(
     async countRemaining() {
       return { review: 2, learning: 1, new: 3 }
     },
+    async countDeckQueues() {
+      return [{ deckId: DECK_ID, review: 4, learning: 1, new: 2 }]
+    },
     async submitReview(input) {
       if (options.conflict === true) {
         throw new StudyStateConflictError()
@@ -168,6 +171,31 @@ const headers = mutationHeaders([`${GUEST_COOKIE_NAME}=${RAW_TOKEN}`], {
 })
 
 describe('study routes', () => {
+  test('デッキごとの当日残数を学習日つきで返す', async () => {
+    const response = await createHarness().request('/api/study/decks', {
+      headers: { cookie: `${GUEST_COOKIE_NAME}=${RAW_TOKEN}` },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      learningDay: '2026-08-21',
+      decks: [
+        {
+          deckId: DECK_ID,
+          remainingReview: 4,
+          remainingLearning: 1,
+          remainingNew: 2,
+        },
+      ],
+    })
+  })
+
+  test('ゲストCookieが無ければデッキごとの残数を返さない', async () => {
+    const response = await createHarness().request('/api/study/decks')
+
+    expect(response.status).toBe(401)
+  })
+
   test('セッション開始時に現在カードと残り枚数を返す', async () => {
     const response = await createHarness().request('/api/study/sessions', {
       method: 'POST',

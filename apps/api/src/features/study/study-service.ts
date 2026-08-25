@@ -90,6 +90,17 @@ export type StudySessionView = {
   remainingNew: number
 }
 
+/** デッキ一覧に添える当日の残り枚数。 */
+export type DeckQueueView = {
+  learningDay: string
+  decks: readonly {
+    deckId: string
+    remainingReview: number
+    remainingLearning: number
+    remainingNew: number
+  }[]
+}
+
 export interface StudyService {
   createSession(
     context: ServiceContext,
@@ -99,6 +110,7 @@ export interface StudyService {
     context: ServiceContext,
     sessionId: string,
   ): Promise<StudySessionView>
+  listDeckQueues(context: ServiceContext): Promise<DeckQueueView>
   submitReview(
     context: ServiceContext,
     input: ReviewSubmitInput,
@@ -175,6 +187,24 @@ export function createStudyService(options: {
       return getSession(context, sessionId)
     },
     getSession,
+    async listDeckQueues(context) {
+      const learningDay = learningDayOf(context.now)
+      const counts = await repository.countDeckQueues({
+        principalId: context.actor.principalId,
+        now: toDate(context.now),
+        learningDay,
+      })
+
+      return {
+        learningDay,
+        decks: counts.map((deck) => ({
+          deckId: deck.deckId,
+          remainingReview: deck.review,
+          remainingLearning: deck.learning,
+          remainingNew: deck.new,
+        })),
+      }
+    },
     async submitReview(context, input) {
       const now = toDate(context.now)
       try {

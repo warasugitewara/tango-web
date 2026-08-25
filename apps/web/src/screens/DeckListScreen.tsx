@@ -18,6 +18,12 @@ export function DeckListScreen() {
     queryFn: () => apiClient.listDecks(),
     enabled: session.data?.authenticated === true,
   })
+  // 当日の残数は学習の進み方で変わるため、デッキ一覧とは別に取る。
+  const deckQueues = useQuery({
+    queryKey: ['deck-queues'],
+    queryFn: () => apiClient.listDeckQueues(),
+    enabled: session.data?.authenticated === true,
+  })
   const startGuest = useMutation({
     mutationFn: (token: string) => apiClient.startGuest(token),
     onSuccess: async () => {
@@ -30,6 +36,7 @@ export function DeckListScreen() {
       // セッションとデッキの両方が別人のものへ変わるため、まとめて捨てる。
       await queryClient.invalidateQueries({ queryKey: ['session'] })
       await queryClient.invalidateQueries({ queryKey: ['decks'] })
+      await queryClient.invalidateQueries({ queryKey: ['deck-queues'] })
     },
   })
 
@@ -44,6 +51,7 @@ export function DeckListScreen() {
     mutationFn: (deckId: string) => apiClient.deleteDeck(deckId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['decks'] })
+      await queryClient.invalidateQueries({ queryKey: ['deck-queues'] })
     },
   })
   const receiveToken = useCallback((token: string | null) => {
@@ -69,6 +77,24 @@ export function DeckListScreen() {
             : 'ログインを開始できませんでした。',
         )
       })
+  }
+
+  /**
+   * 当日あと何枚かを1行で示す。
+   * 再学習は復習側へ足し、学習画面の残り表示と読み方を揃える。
+   */
+  const todayLabel = (deckId: string): string => {
+    const queue = deckQueues.data?.find(
+      (candidate) => candidate.deckId === deckId,
+    )
+    if (queue === undefined) {
+      return ''
+    }
+    const review = queue.remainingReview + queue.remainingLearning
+    if (review === 0 && queue.remainingNew === 0) {
+      return '今日はここまで'
+    }
+    return `今日 復習${review}・新規${queue.remainingNew}`
   }
 
   if (session.isPending) {
@@ -190,6 +216,7 @@ export function DeckListScreen() {
             <div className="deck-meta">
               <span>{deck.cardCount}枚</span>
               <span>新規 {deck.newCardLimit}枚/日</span>
+              <span className="deck-today">{todayLabel(deck.id)}</span>
             </div>
             <div className="deck-actions">
               <Link to={`/decks/${deck.id}`}>カードを見る</Link>

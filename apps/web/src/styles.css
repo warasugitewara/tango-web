@@ -228,6 +228,10 @@ button:disabled {
     monospace;
 }
 
+.deck-today {
+  color: #315c75;
+}
+
 .deck-actions a {
   color: #254f68;
   font-weight: 700;

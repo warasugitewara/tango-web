@@ -30,6 +30,12 @@ export function createStudyRoutes(options: { service: StudyService }) {
   const { service } = options
 
   return new Hono<AppEnv>()
+    .get('/study/decks', async (context) => {
+      const result = await service.listDeckQueues(
+        requireServiceContext(context),
+      )
+      return context.json(result)
+    })
     .post(
       '/study/sessions',
       zValidator('json', studySessionCreateSchema, validationFailure),

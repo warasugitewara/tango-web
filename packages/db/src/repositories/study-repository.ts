@@ -81,6 +81,20 @@ export type QueueInput = {
 
 export type CountInput = Omit<QueueInput, 'initialSchedule'>
 
+/** デッキ一覧に出す当日の残り枚数。新規は1日の上限を反映した後の値。 */
+export type DeckQueueCounts = {
+  deckId: string
+  review: number
+  learning: number
+  new: number
+}
+
+export type DeckQueueInput = {
+  principalId: string
+  now: Date
+  learningDay: string
+}
+
 export type SubmitReviewInput = {
   principalId: string
   sessionId: string
@@ -128,6 +142,7 @@ export interface StudyRepository {
   createSession(input: CreateSessionInput): Promise<string>
   nextCard(input: QueueInput): Promise<QueuedCard | null>
   countRemaining(input: CountInput): Promise<RemainingCounts>
+  countDeckQueues(input: DeckQueueInput): Promise<readonly DeckQueueCounts[]>
   submitReview(input: SubmitReviewInput): Promise<ReviewOutcome>
 }
 
@@ -423,6 +438,91 @@ export function createStudyRepository(db: Database): StudyRepository {
           (byState.get('learning') ?? 0) + (byState.get('relearning') ?? 0),
         new: (byState.get('new') ?? 0) + (unscheduled?.value ?? 0),
       }
+    },
+
+    /**
+     * デッキ一覧のための当日残数。セッションを作らずに数える。
+     * 新規は出題側と同じ規則で、1学習日あたりの上限から当日出した分を引く。
+     */
+    async countDeckQueues(input) {
+      const owned = await db
+        .select({ id: decks.id, newCardLimit: decks.newCardLimit })
+        .from(decks)
+        .where(
+          and(
+            eq(decks.principalId, input.principalId),
+            isNull(decks.trashedAt),
+          ),
+        )
+        .orderBy(asc(decks.sortOrder), asc(decks.createdAt))
+
+      if (owned.length === 0) {
+        return []
+      }
+
+      const deckIds = owned.map((deck) => deck.id)
+
+      const scheduled = await db
+        .select({
+          deckId: cards.deckId,
+          state: cardSchedules.state,
+          value: sql<number>`count(*)::int`,
+        })
+        .from(cardSchedules)
+        .innerJoin(cards, eq(cards.id, cardSchedules.cardId))
+        .where(
+          and(
+            inArray(cards.deckId, deckIds),
+            isNull(cards.trashedAt),
+            or(
+              eq(cardSchedules.state, 'new'),
+              lte(cardSchedules.dueAt, input.now),
+            ),
+          ),
+        )
+        .groupBy(cards.deckId, cardSchedules.state)
+
+      // スケジュール行がまだ無いカードも新規として数える。
+      const unscheduled = await db
+        .select({ deckId: cards.deckId, value: sql<number>`count(*)::int` })
+        .from(cards)
+        .leftJoin(cardSchedules, eq(cardSchedules.cardId, cards.id))
+        .where(
+          and(
+            inArray(cards.deckId, deckIds),
+            isNull(cards.trashedAt),
+            isNull(cardSchedules.cardId),
+          ),
+        )
+        .groupBy(cards.deckId)
+
+      const introduced = await countTodaysNewByDeck(
+        input.principalId,
+        deckIds,
+        input.learningDay,
+      )
+
+      const countOf = (deckId: string, state: FsrsStateValue): number =>
+        scheduled.find((row) => row.deckId === deckId && row.state === state)
+          ?.value ?? 0
+
+      return owned.map((deck) => {
+        const availableNew =
+          countOf(deck.id, 'new') +
+          (unscheduled.find((row) => row.deckId === deck.id)?.value ?? 0)
+        const allowedNew = Math.max(
+          0,
+          deck.newCardLimit - (introduced.get(deck.id) ?? 0),
+        )
+
+        return {
+          deckId: deck.id,
+          review: countOf(deck.id, 'review'),
+          learning:
+            countOf(deck.id, 'learning') + countOf(deck.id, 'relearning'),
+          new: Math.min(availableNew, allowedNew),
+        }
+      })
     },
 
     async submitReview(input) {

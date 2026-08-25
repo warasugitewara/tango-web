@@ -9,7 +9,11 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function renderScreen(session: unknown, decks: unknown[] = []) {
+function renderScreen(
+  session: unknown,
+  decks: unknown[] = [],
+  deckQueues: unknown[] = [],
+) {
   let currentDecks = [...decks]
   const deletedPaths: string[] = []
   const fetchStub = async (
@@ -38,6 +42,12 @@ function renderScreen(session: unknown, decks: unknown[] = []) {
           deck.id !== deletedId,
       )
       return new Response(null, { status: 204 })
+    }
+    if (path === '/api/study/decks') {
+      return new Response(
+        JSON.stringify({ learningDay: '2026-08-25', decks: deckQueues }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
     }
     const body = path === '/api/session' ? session : { decks: currentDecks }
     return new Response(JSON.stringify(body), {
@@ -247,5 +257,65 @@ describe('ログイン導線', () => {
     expect(
       await screen.findByRole('button', { name: 'ログアウト' }),
     ).toBeDefined()
+  })
+})
+
+describe('当日の残り枚数', () => {
+  const guestSession = {
+    authenticated: true,
+    kind: 'guest',
+    expiresAt: '2026-11-19T12:00:00+09:00',
+    warning: 'Cookieを削除すると復元できません。',
+  }
+
+  const deckId = '019fd000-0000-7000-8000-000000000030'
+  const deck = {
+    id: deckId,
+    name: '英単語',
+    description: null,
+    newCardLimit: 20,
+    cardCount: 30,
+  }
+
+  test('復習と新規の残りをデッキごとに出す', async () => {
+    renderScreen(
+      guestSession,
+      [deck],
+      [
+        {
+          deckId,
+          remainingReview: 4,
+          remainingLearning: 1,
+          remainingNew: 2,
+        },
+      ],
+    )
+
+    // 再学習は復習と同じ列に足して出す。学習画面の残り表示と桁を揃える。
+    expect(await screen.findByText('今日 復習5・新規2')).toBeTruthy()
+  })
+
+  test('残りが無ければ今日は完了と出す', async () => {
+    renderScreen(
+      guestSession,
+      [deck],
+      [
+        {
+          deckId,
+          remainingReview: 0,
+          remainingLearning: 0,
+          remainingNew: 0,
+        },
+      ],
+    )
+
+    expect(await screen.findByText('今日はここまで')).toBeTruthy()
+  })
+
+  test('残数を取得できていないデッキには枚数を出さない', async () => {
+    renderScreen(guestSession, [deck], [])
+
+    expect(await screen.findByText('英単語')).toBeTruthy()
+    expect(screen.queryByText('今日はここまで')).toBeNull()
   })
 })
