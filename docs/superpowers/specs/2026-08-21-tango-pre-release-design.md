@@ -58,7 +58,7 @@
 
 | メソッドとパス | 役割 |
 | --- | --- |
-| `GET /api/decks` | デッキ一覧。カード枚数と当日の残り枚数を含む |
+| `GET /api/decks` | デッキ一覧。カード枚数と新規上限を含む |
 | `POST /api/decks` | デッキ作成 |
 | `PATCH /api/decks/:deckId` | 名前・説明・新規カード上限の更新 |
 | `DELETE /api/decks/:deckId` | 論理削除 |
@@ -70,6 +70,9 @@
 | `POST /api/study/sessions` | 学習セッション開始 |
 | `GET /api/study/sessions/:sessionId` | 現在のカード、4通りの間隔プレビュー、残り枚数 |
 | `POST /api/study/reviews` | 評価の投稿 |
+| `GET /api/study/decks` | デッキごとの当日残数（復習・再学習・新規） |
+
+当日の残数は本書の初版で `GET /api/decks` に含める想定だったが、実装では `GET /api/study/decks` へ分けた。残数の算出は出題キューの規則そのもので、コンテンツ側のルータから学習側の内部を参照させないためである。画面はデッキIDで両者を突き合わせる。
 
 契約は `packages/shared/src/contracts/` に Zod の strict スキーマとして置く。`reviewSubmitSchema` は上位計画に定義済みの形をそのまま使い、`sessionId`、`cardId`、`rating 1..4`、`expectedScheduleVersion`、`idempotencyKey` を受け取り、クライアント時刻は受け取らない。
 
