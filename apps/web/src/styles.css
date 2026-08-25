@@ -326,6 +326,32 @@ textarea {
   margin-top: 28px;
 }
 
+.card-range {
+  color: #4a5f66;
+  font-weight: 700;
+}
+
+.card-paging {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.card-paging button {
+  padding: 10px 18px;
+  border: 1px solid #aebfbc;
+  background: white;
+  color: #17252b;
+  font: inherit;
+  font-weight: 700;
+}
+
+.card-paging button:disabled {
+  color: #8d9c9f;
+  cursor: not-allowed;
+}
+
 .content-card {
   position: relative;
   display: grid;

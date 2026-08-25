@@ -37,6 +37,9 @@ function createRepository(): ContentRepository {
     async listCards() {
       return []
     },
+    async countCards() {
+      return 0
+    },
     async createCard(_principalId, deckId, input, now) {
       return {
         id: uuidv7(),
@@ -168,6 +171,41 @@ describe('content routes', () => {
     expect(await response.json()).toMatchObject({
       error: { code: 'NOT_FOUND' },
     })
+  })
+
+  test('カード一覧は総数とページ範囲を返す', async () => {
+    const deckId = uuidv7()
+    const listed: Array<{ limit: number; offset: number }> = []
+    const repository = createRepository()
+    const harness = createHarness({
+      ...repository,
+      async listCards(_principalId, requestedDeckId, limit, offset) {
+        listed.push({ limit, offset })
+        return [
+          {
+            id: uuidv7(),
+            deckId: requestedDeckId,
+            front: '表',
+            back: '裏',
+            contentHash: 'a'.repeat(64),
+            createdAt: new Date('2026-08-21T03:00:00Z'),
+            updatedAt: new Date('2026-08-21T03:00:00Z'),
+          },
+        ]
+      },
+      async countCards() {
+        return 120
+      },
+    })
+
+    const response = await harness.request(
+      `/api/decks/${deckId}/cards?limit=50&offset=50`,
+      { headers: guestHeaders() },
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ total: 120 })
+    expect(listed).toEqual([{ limit: 50, offset: 50 }])
   })
 
   test('20000文字を超える本文は400を返す', async () => {

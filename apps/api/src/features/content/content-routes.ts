@@ -138,13 +138,23 @@ export function createContentRoutes(options: {
       async (context) => {
         const { actor } = requireServiceContext(context)
         const query = context.req.valid('query')
-        const cards = await repository.listCards(
-          actor.principalId,
-          context.req.valid('param').deckId,
-          query.limit,
-          query.offset,
-        )
-        return context.json({ cards: cards.map(toCardView) })
+        const deckId = context.req.valid('param').deckId
+        // 総数を併せて返す。画面はこれだけでページ送りの有無を判断できる。
+        const [cards, total] = await Promise.all([
+          repository.listCards(
+            actor.principalId,
+            deckId,
+            query.limit,
+            query.offset,
+          ),
+          repository.countCards(actor.principalId, deckId),
+        ])
+        return context.json({
+          cards: cards.map(toCardView),
+          total,
+          limit: query.limit,
+          offset: query.offset,
+        })
       },
     )
     .post(

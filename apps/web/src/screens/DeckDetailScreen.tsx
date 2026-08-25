@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { apiClient, type CardRecord, type DeckSummary } from '../api/client'
 import { CardMarkdown } from '../components/CardMarkdown'
+
+/** カード一覧の1ページに出す枚数。APIのlimit上限100の範囲に収める。 */
+const PAGE_SIZE = 50
 
 /** 新規上限として受け付ける範囲。共有契約の `deckUpdateSchema` と揃える。 */
 const NEW_CARD_LIMIT_MAX = 1_000
@@ -164,12 +167,24 @@ export function DeckDetailScreen() {
   const [format, setFormat] = useState<'json' | 'csv'>('json')
   const [payload, setPayload] = useState('')
   const [importedCount, setImportedCount] = useState<number | null>(null)
+  const [offset, setOffset] = useState(0)
 
   const cards = useQuery({
-    queryKey: ['cards', resolvedDeckId],
-    queryFn: () => apiClient.listCards(resolvedDeckId),
+    queryKey: ['cards', resolvedDeckId, offset],
+    queryFn: () =>
+      apiClient.listCards(resolvedDeckId, { limit: PAGE_SIZE, offset }),
     enabled: deckId !== undefined,
   })
+  const total = cards.data?.total ?? 0
+  const shown = cards.data?.cards.length ?? 0
+
+  // 削除や取り込みで総数が変わると、今の位置が範囲外になることがある。
+  // その場合は最後のページへ寄せて、空の画面のまま止まらないようにする。
+  useEffect(() => {
+    if (cards.data !== undefined && offset > 0 && offset >= total) {
+      setOffset(Math.max(0, Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE))
+    }
+  }, [cards.data, offset, total])
   // デッキ単体の取得APIは持たない。一覧は利用者ごとに小さく、
   // 単語帳一覧と同じキャッシュを共有できるため、そこから引く。
   const decks = useQuery({
@@ -309,11 +324,18 @@ export function DeckDetailScreen() {
 
       <section className="card-list" aria-label="カード一覧">
         {cards.isPending ? <p>カードを読み込み中…</p> : null}
-        {cards.data?.length === 0 ? <p>カードはまだありません。</p> : null}
-        {cards.data?.map((card, index) => (
+        {cards.data !== undefined && total === 0 ? (
+          <p>カードはまだありません。</p>
+        ) : null}
+        {cards.data === undefined || total === 0 ? null : (
+          <p className="card-range">
+            {total}枚中 {offset + 1}〜{offset + shown}枚を表示
+          </p>
+        )}
+        {cards.data?.cards.map((card, index) => (
           <article className="content-card" key={card.id}>
             <span className="card-number">
-              {String(index + 1).padStart(2, '0')}
+              {String(offset + index + 1).padStart(2, '0')}
             </span>
             <div className="card-face">
               <span>表</span>
@@ -341,6 +363,28 @@ export function DeckDetailScreen() {
             </div>
           </article>
         ))}
+        {total > PAGE_SIZE ? (
+          <nav className="card-paging" aria-label="カード一覧のページ送り">
+            <button
+              type="button"
+              disabled={offset === 0}
+              onClick={() => {
+                setOffset(Math.max(0, offset - PAGE_SIZE))
+              }}
+            >
+              前の50件
+            </button>
+            <button
+              type="button"
+              disabled={offset + PAGE_SIZE >= total}
+              onClick={() => {
+                setOffset(offset + PAGE_SIZE)
+              }}
+            >
+              次の50件
+            </button>
+          </nav>
+        ) : null}
       </section>
     </main>
   )

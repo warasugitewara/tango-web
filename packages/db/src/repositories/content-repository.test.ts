@@ -307,6 +307,50 @@ describe('ContentRepository', () => {
       expect(cards.map((card) => card.front)).toEqual(['2', '3'])
     })
 
+    test('総数はゴミ箱と他人のデッキを除いて数える', async () => {
+      const owner = await insertGuestPrincipal()
+      const other = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      const first = await repository.createCard(
+        owner,
+        deck.id,
+        { front: '1', back: 'a' },
+        now,
+      )
+      await repository.createCard(
+        owner,
+        deck.id,
+        { front: '2', back: 'b' },
+        now,
+      )
+
+      expect(first).not.toBeNull()
+      if (first !== null) {
+        await repository.trashCard(owner, first.id, now)
+      }
+
+      expect(await repository.countCards(owner, deck.id)).toBe(1)
+      expect(await repository.countCards(other, deck.id)).toBe(0)
+    })
+
+    test('offsetで続きのカードを取り出す', async () => {
+      const owner = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      await repository.createCards(
+        owner,
+        deck.id,
+        [
+          { front: '1', back: 'a' },
+          { front: '2', back: 'b' },
+          { front: '3', back: 'c' },
+        ],
+        now,
+      )
+
+      const second = await repository.listCards(owner, deck.id, 2, 2)
+      expect(second.map((card) => card.front)).toEqual(['3'])
+    })
+
     test('他人のデッキのカード一覧は空になる', async () => {
       const owner = await insertGuestPrincipal()
       const other = await insertGuestPrincipal()

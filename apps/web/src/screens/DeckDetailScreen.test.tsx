@@ -51,19 +51,40 @@ const DEFAULT_DECK: DeckFixture = {
   cardCount: 0,
 }
 
-function renderScreen(options: { deck?: DeckFixture | null } = {}) {
-  const cards: Array<Record<string, unknown>> = []
+function seedCards(total: number): Array<Record<string, unknown>> {
+  return Array.from({ length: total }, (_unused, index) => ({
+    id: `019fd000-0000-7000-8000-${String(index).padStart(12, '0')}`,
+    deckId: DECK_ID,
+    front: `表${index + 1}`,
+    back: `裏${index + 1}`,
+    contentHash: 'a'.repeat(64),
+    createdAt: '2026-08-21T12:00:00+09:00',
+    updatedAt: '2026-08-21T12:00:00+09:00',
+  }))
+}
+
+function renderScreen(
+  options: { deck?: DeckFixture | null; cardCount?: number } = {},
+) {
+  const cards: Array<Record<string, unknown>> = seedCards(
+    options.cardCount ?? 0,
+  )
   const deckPatches: Array<Record<string, unknown>> = []
+  const cardListQueries: Array<{
+    limit: string | null
+    offset: string | null
+  }> = []
   let deck: DeckFixture | null =
     options.deck === undefined ? DEFAULT_DECK : options.deck
   const fetchStub = async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> => {
-    const path = new URL(
+    const url = new URL(
       typeof input === 'string' ? input : input.toString(),
       'https://tango.test',
-    ).pathname
+    )
+    const path = url.pathname
     // CSRFトークンの発行はクライアントが自動で行う。
     if (path === '/api/security/csrf') {
       return new Response(JSON.stringify({ csrfToken: 'test-token' }), {
@@ -84,6 +105,19 @@ function renderScreen(options: { deck?: DeckFixture | null } = {}) {
       }
       return Response.json({ deck })
     }
+    if (init?.method === undefined && path.endsWith('/cards')) {
+      const limit = url.searchParams.get('limit')
+      const offset = url.searchParams.get('offset')
+      cardListQueries.push({ limit, offset })
+      const from = offset === null ? 0 : Number(offset)
+      const size = limit === null ? 50 : Number(limit)
+      return Response.json({
+        cards: cards.slice(from, from + size),
+        total: cards.length,
+        limit: size,
+        offset: from,
+      })
+    }
     if (init?.method === 'POST' && path.endsWith('/cards')) {
       const body: unknown = JSON.parse(
         typeof init.body === 'string' ? init.body : '{}',
@@ -98,12 +132,13 @@ function renderScreen(options: { deck?: DeckFixture | null } = {}) {
           updatedAt: '2026-08-21T12:00:00+09:00',
         })
       }
-      return Response.json({ card: cards[0] }, { status: 201 })
+      return Response.json({ card: cards.at(-1) }, { status: 201 })
     }
     if (init?.method === 'DELETE') {
+      cards.pop()
       return new Response(null, { status: 204 })
     }
-    return Response.json({ cards })
+    return Response.json({ cards, total: cards.length })
   }
   vi.stubGlobal('fetch', fetchStub)
 
@@ -120,7 +155,7 @@ function renderScreen(options: { deck?: DeckFixture | null } = {}) {
     </MemoryRouter>,
   )
 
-  return { deckPatches }
+  return { deckPatches, cardListQueries }
 }
 
 describe('DeckDetailScreen', () => {
@@ -238,5 +273,48 @@ describe('デッキの設定', () => {
 
     const save = screen.getByRole('button', { name: '設定を保存' })
     expect(save.hasAttribute('disabled')).toBe(true)
+  })
+})
+
+describe('カード一覧のページ送り', () => {
+  test('総数と表示中の範囲を出す', async () => {
+    renderScreen({ cardCount: 120 })
+
+    expect(await screen.findByText('120枚中 1〜50枚を表示')).toBeTruthy()
+  })
+
+  test('次の50件で51枚目以降を取り出す', async () => {
+    const { cardListQueries } = renderScreen({ cardCount: 120 })
+
+    fireEvent.click(await screen.findByRole('button', { name: '次の50件' }))
+
+    expect(await screen.findByText('120枚中 51〜100枚を表示')).toBeTruthy()
+    // 編集フォームのtextareaにも同じ本文が入るため、複数一致を許す。
+    expect((await screen.findAllByText('表51')).length).toBeGreaterThan(0)
+    expect(cardListQueries.at(-1)).toEqual({ limit: '50', offset: '50' })
+  })
+
+  test('先頭では前の50件を押せない', async () => {
+    renderScreen({ cardCount: 120 })
+
+    const previous = await screen.findByRole('button', { name: '前の50件' })
+    expect(previous.hasAttribute('disabled')).toBe(true)
+  })
+
+  test('50枚以下ならページ送りを出さない', async () => {
+    renderScreen({ cardCount: 3 })
+
+    expect((await screen.findAllByText('表1')).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: '次の50件' })).toBeNull()
+  })
+
+  test('末尾では次の50件を押せない', async () => {
+    renderScreen({ cardCount: 60 })
+
+    fireEvent.click(await screen.findByRole('button', { name: '次の50件' }))
+
+    expect(await screen.findByText('60枚中 51〜60枚を表示')).toBeTruthy()
+    const next = screen.getByRole('button', { name: '次の50件' })
+    expect(next.hasAttribute('disabled')).toBe(true)
   })
 })

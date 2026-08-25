@@ -41,6 +41,12 @@ export type CardRecord = {
   updatedAt: string
 }
 
+/** カード一覧の1ページ。`total` はゴミ箱を除いたデッキ内の総数。 */
+export type CardPage = {
+  cards: readonly CardRecord[]
+  total: number
+}
+
 export type StudySessionView = {
   sessionId: string
   learningDay: string
@@ -407,12 +413,23 @@ export const apiClient = {
   async deleteDeck(deckId: string): Promise<void> {
     await request(`/api/decks/${deckId}`, { method: 'DELETE' })
   },
-  async listCards(deckId: string): Promise<readonly CardRecord[]> {
-    const body = await request(`/api/decks/${deckId}/cards`)
-    if (!isRecord(body) || !Array.isArray(body.cards)) {
+  async listCards(
+    deckId: string,
+    page: { limit: number; offset: number },
+  ): Promise<CardPage> {
+    const query = new URLSearchParams({
+      limit: String(page.limit),
+      offset: String(page.offset),
+    })
+    const body = await request(`/api/decks/${deckId}/cards?${query.toString()}`)
+    if (
+      !isRecord(body) ||
+      !Array.isArray(body.cards) ||
+      typeof body.total !== 'number'
+    ) {
       throw new ApiClientError('INVALID_RESPONSE', 'カードを読み込めません。')
     }
-    return body.cards.map(parseCard)
+    return { cards: body.cards.map(parseCard), total: body.total }
   },
   async createCard(
     deckId: string,
