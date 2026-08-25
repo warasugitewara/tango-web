@@ -269,9 +269,15 @@ button:disabled {
 
 .card-form,
 .import-form,
+.deck-settings-form,
 .card-edit form {
   display: grid;
   gap: 14px;
+}
+
+.deck-settings-form {
+  grid-template-columns: 2fr 1fr auto;
+  align-items: end;
 }
 
 .card-form {
@@ -281,6 +287,7 @@ button:disabled {
 
 .card-form label,
 .import-form label,
+.deck-settings-form label,
 .card-edit label {
   display: grid;
   gap: 7px;
@@ -304,6 +311,7 @@ textarea {
 
 .card-form button,
 .import-form button,
+.deck-settings-form button,
 .card-edit button {
   padding: 11px 16px;
   border: 0;
@@ -533,6 +541,7 @@ textarea {
   }
 
   .card-form,
+  .deck-settings-form,
   .content-card {
     grid-template-columns: 1fr;
   }

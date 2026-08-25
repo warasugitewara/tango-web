@@ -1,6 +1,7 @@
 import type {
   CardContentInput,
   DeckCreateInput,
+  DeckUpdateInput,
   ImportRequest,
   PublicRating,
   ReviewSubmitInput,
@@ -387,6 +388,19 @@ export const apiClient = {
     })
     if (!isRecord(body)) {
       throw new ApiClientError('INVALID_RESPONSE', 'デッキを作成できません。')
+    }
+    return parseDeck(body.deck)
+  },
+  async updateDeck(
+    deckId: string,
+    input: DeckUpdateInput,
+  ): Promise<DeckSummary> {
+    const body = await request(`/api/decks/${deckId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    })
+    if (!isRecord(body)) {
+      throw new ApiClientError('INVALID_RESPONSE', 'デッキを更新できません。')
     }
     return parseDeck(body.deck)
   },

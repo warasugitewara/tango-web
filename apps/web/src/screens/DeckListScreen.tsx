@@ -181,7 +181,11 @@ export function DeckListScreen() {
             <div className="deck-tab" aria-hidden="true" />
             <div>
               <h2>{deck.name}</h2>
-              <p>{deck.description ?? '説明はまだありません。'}</p>
+              <p>
+                {deck.description === null || deck.description === ''
+                  ? '説明はまだありません。'
+                  : deck.description}
+              </p>
             </div>
             <div className="deck-meta">
               <span>{deck.cardCount}枚</span>

@@ -35,8 +35,27 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function renderScreen() {
+type DeckFixture = {
+  id: string
+  name: string
+  description: string | null
+  newCardLimit: number
+  cardCount: number
+}
+
+const DEFAULT_DECK: DeckFixture = {
+  id: DECK_ID,
+  name: '英単語',
+  description: null,
+  newCardLimit: 20,
+  cardCount: 0,
+}
+
+function renderScreen(options: { deck?: DeckFixture | null } = {}) {
   const cards: Array<Record<string, unknown>> = []
+  const deckPatches: Array<Record<string, unknown>> = []
+  let deck: DeckFixture | null =
+    options.deck === undefined ? DEFAULT_DECK : options.deck
   const fetchStub = async (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -51,6 +70,19 @@ function renderScreen() {
         status: 200,
         headers: { 'content-type': 'application/json' },
       })
+    }
+    if (path === '/api/decks') {
+      return Response.json({ decks: deck === null ? [] : [deck] })
+    }
+    if (init?.method === 'PATCH' && path === `/api/decks/${DECK_ID}`) {
+      const body: unknown = JSON.parse(
+        typeof init.body === 'string' ? init.body : '{}',
+      )
+      if (typeof body === 'object' && body !== null && deck !== null) {
+        deckPatches.push({ ...body })
+        deck = { ...deck, ...body }
+      }
+      return Response.json({ deck })
     }
     if (init?.method === 'POST' && path.endsWith('/cards')) {
       const body: unknown = JSON.parse(
@@ -87,6 +119,8 @@ function renderScreen() {
       </QueryClientProvider>
     </MemoryRouter>,
   )
+
+  return { deckPatches }
 }
 
 describe('DeckDetailScreen', () => {
@@ -137,5 +171,72 @@ describe('DeckDetailScreen', () => {
 
     expect(messages).toHaveLength(1)
     expect(messages[0]).toContain('戻せません')
+  })
+})
+
+describe('デッキの設定', () => {
+  test('見出しにデッキ名を出す', async () => {
+    renderScreen()
+
+    expect(await screen.findByRole('heading', { name: '英単語' })).toBeTruthy()
+  })
+
+  test('名前・説明・新規上限をまとめて保存する', async () => {
+    const { deckPatches } = renderScreen()
+
+    fireEvent.change(await screen.findByLabelText('デッキ名'), {
+      target: { value: '英単語 中級' },
+    })
+    fireEvent.change(screen.getByLabelText('説明'), {
+      target: { value: '毎日すこしずつ。' },
+    })
+    fireEvent.change(screen.getByLabelText('1日の新規上限'), {
+      target: { value: '5' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '設定を保存' }))
+
+    expect(
+      await screen.findByRole('heading', { name: '英単語 中級' }),
+    ).toBeTruthy()
+    expect(deckPatches).toEqual([
+      {
+        name: '英単語 中級',
+        description: '毎日すこしずつ。',
+        newCardLimit: 5,
+      },
+    ])
+  })
+
+  test('説明を空にすると説明なしとして送る', async () => {
+    const { deckPatches } = renderScreen({
+      deck: {
+        id: DECK_ID,
+        name: '英単語',
+        description: '前の説明',
+        newCardLimit: 20,
+        cardCount: 0,
+      },
+    })
+
+    fireEvent.change(await screen.findByLabelText('説明'), {
+      target: { value: '' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '設定を保存' }))
+
+    await screen.findByText('設定を保存しました。')
+    expect(deckPatches).toEqual([
+      { name: '英単語', description: '', newCardLimit: 20 },
+    ])
+  })
+
+  test('名前が空のあいだは保存できない', async () => {
+    renderScreen()
+
+    fireEvent.change(await screen.findByLabelText('デッキ名'), {
+      target: { value: '   ' },
+    })
+
+    const save = screen.getByRole('button', { name: '設定を保存' })
+    expect(save.hasAttribute('disabled')).toBe(true)
   })
 })

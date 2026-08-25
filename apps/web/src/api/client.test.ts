@@ -66,10 +66,20 @@ function stubFetch(options: { failFirstMutation?: boolean } = {}) {
         }
       }
 
-      return new Response(JSON.stringify({ deck: null, decks: [] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      })
+      // 応答本文はクライアント側の解析を通す必要があるため、実在する形にする。
+      return new Response(
+        JSON.stringify({
+          deck: {
+            id: '019fd000-0000-7000-8000-000000000010',
+            name: '英単語 中級',
+            description: null,
+            newCardLimit: 5,
+            cardCount: 0,
+          },
+          decks: [],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
     },
   )
 
@@ -151,5 +161,23 @@ describe('CSRFトークンの送信', () => {
 
     const apiClient = await loadClient()
     await expect(apiClient.signOut()).rejects.toThrow(/許可されていません/)
+  })
+})
+
+describe('デッキの更新', () => {
+  test('PATCHで指定したデッキだけを更新する', async () => {
+    const stub = stubFetch()
+    const apiClient = await loadClient()
+
+    await apiClient.updateDeck('019fd000-0000-7000-8000-000000000010', {
+      name: '英単語 中級',
+      newCardLimit: 5,
+    })
+
+    const mutation = stub.calls.find((call) => call.method === 'PATCH')
+    expect(mutation?.path).toBe(
+      '/api/decks/019fd000-0000-7000-8000-000000000010',
+    )
+    expect(mutation?.headers.get('x-tango-csrf')).toBe('token-1')
   })
 })

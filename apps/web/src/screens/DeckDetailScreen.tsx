@@ -1,8 +1,116 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { apiClient, type CardRecord } from '../api/client'
+import { apiClient, type CardRecord, type DeckSummary } from '../api/client'
 import { CardMarkdown } from '../components/CardMarkdown'
+
+/** 新規上限として受け付ける範囲。共有契約の `deckUpdateSchema` と揃える。 */
+const NEW_CARD_LIMIT_MAX = 1_000
+
+function parseNewCardLimit(value: string): number | null {
+  if (!/^\d+$/.test(value.trim())) {
+    return null
+  }
+  const parsed = Number(value)
+  return parsed <= NEW_CARD_LIMIT_MAX ? parsed : null
+}
+
+/**
+ * デッキ名・説明・新規上限をまとめて更新する。
+ * 変更はPATCHで送るが、部分更新の差分計算は持たず3項目を常に送る。
+ * 画面が持つ値がそのまま保存される形にして、押した結果を読み違えないようにする。
+ */
+function DeckSettingsForm(props: { deck: DeckSummary }) {
+  const { deck } = props
+  const queryClient = useQueryClient()
+  const [name, setName] = useState(deck.name)
+  const [description, setDescription] = useState(deck.description ?? '')
+  const [newCardLimit, setNewCardLimit] = useState(String(deck.newCardLimit))
+  const parsedLimit = parseNewCardLimit(newCardLimit)
+  const update = useMutation({
+    mutationFn: (input: {
+      name: string
+      description: string
+      newCardLimit: number
+    }) => apiClient.updateDeck(deck.id, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['decks'] })
+    },
+  })
+
+  return (
+    <section className="content-panel">
+      <h2>デッキの設定</h2>
+      <form
+        className="deck-settings-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (parsedLimit === null) {
+            return
+          }
+          update.mutate({
+            name: name.trim(),
+            description,
+            newCardLimit: parsedLimit,
+          })
+        }}
+      >
+        <label>
+          デッキ名
+          <input
+            value={name}
+            maxLength={100}
+            onChange={(event) => {
+              setName(event.target.value)
+            }}
+          />
+        </label>
+        <label>
+          説明
+          <textarea
+            value={description}
+            maxLength={1_000}
+            onChange={(event) => {
+              setDescription(event.target.value)
+            }}
+          />
+        </label>
+        <label>
+          1日の新規上限
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={NEW_CARD_LIMIT_MAX}
+            value={newCardLimit}
+            onChange={(event) => {
+              setNewCardLimit(event.target.value)
+            }}
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={
+            update.isPending || name.trim() === '' || parsedLimit === null
+          }
+        >
+          設定を保存
+        </button>
+      </form>
+      {parsedLimit === null ? (
+        <p className="form-error">
+          新規上限は0以上{NEW_CARD_LIMIT_MAX}以下の整数で入力してください。
+        </p>
+      ) : null}
+      {update.isSuccess && !update.isPending ? (
+        <p>設定を保存しました。</p>
+      ) : null}
+      {update.isError ? (
+        <p className="form-error">{update.error.message}</p>
+      ) : null}
+    </section>
+  )
+}
 
 function EditCardForm(props: { card: CardRecord }) {
   const { card } = props
@@ -62,6 +170,14 @@ export function DeckDetailScreen() {
     queryFn: () => apiClient.listCards(resolvedDeckId),
     enabled: deckId !== undefined,
   })
+  // デッキ単体の取得APIは持たない。一覧は利用者ごとに小さく、
+  // 単語帳一覧と同じキャッシュを共有できるため、そこから引く。
+  const decks = useQuery({
+    queryKey: ['decks'],
+    queryFn: () => apiClient.listDecks(),
+    enabled: deckId !== undefined,
+  })
+  const deck = decks.data?.find((candidate) => candidate.id === resolvedDeckId)
   const create = useMutation({
     mutationFn: () => apiClient.createCard(resolvedDeckId, { front, back }),
     onSuccess: async () => {
@@ -100,12 +216,16 @@ export function DeckDetailScreen() {
       <header className="detail-header">
         <div>
           <Link to="/">← 単語帳へ</Link>
-          <h1>カード</h1>
+          <h1>{deck === undefined ? 'カード' : deck.name}</h1>
         </div>
         <Link className="study-link" to={`/study?deckId=${deckId}`}>
           この単語帳を学習
         </Link>
       </header>
+
+      {deck === undefined ? null : (
+        <DeckSettingsForm deck={deck} key={deck.id} />
+      )}
 
       <section className="content-panel">
         <h2>カードを追加</h2>

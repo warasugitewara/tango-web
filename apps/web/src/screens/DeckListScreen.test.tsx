@@ -117,6 +117,29 @@ describe('DeckListScreen', () => {
     expect(screen.getByText('12枚')).toBeTruthy()
   })
 
+  test('説明が空文字なら説明なしとして表示する', async () => {
+    // 設定画面で説明を消すと空文字が保存される。nullと同じ扱いにする。
+    renderScreen(
+      {
+        authenticated: true,
+        kind: 'guest',
+        expiresAt: '2026-11-19T12:00:00+09:00',
+        warning: 'Cookieを削除すると復元できません。',
+      },
+      [
+        {
+          id: '019fd000-0000-7000-8000-000000000011',
+          name: '英単語',
+          description: '',
+          newCardLimit: 20,
+          cardCount: 3,
+        },
+      ],
+    )
+
+    expect(await screen.findByText('説明はまだありません。')).toBeTruthy()
+  })
+
   test('確認後にデモデッキを削除して一覧から消す', async () => {
     const demoId = '019fd000-0000-7000-8000-000000000020'
     const { deletedPaths } = renderScreen(
