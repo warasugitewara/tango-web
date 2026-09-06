@@ -6,7 +6,7 @@ import {
 } from '@tango/shared'
 import { beforeEach, describe, expect, test } from 'vitest'
 import { createApp } from '../../app'
-import { MAX_REQUEST_BODY_BYTES } from '../../middleware/json-body-guard'
+import { GENERIC_BODY_LIMIT_BYTES } from '../../middleware/json-body-guard'
 import { mutationHeaders } from '../../test/request-headers'
 import type { ActorResolver, FormalSession } from './actor-resolver'
 import {
@@ -435,7 +435,7 @@ describe('request body boundaries', () => {
 
   test('rejects a body that exceeds the size limit', async () => {
     const oversized = JSON.stringify({
-      turnstileToken: 'a'.repeat(MAX_REQUEST_BODY_BYTES),
+      turnstileToken: 'a'.repeat(GENERIC_BODY_LIMIT_BYTES),
     })
 
     const response = await harness.app.request('/api/guest/start', {
@@ -455,7 +455,7 @@ describe('request body boundaries', () => {
   test('accepts a body that sits just under the size limit', async () => {
     // 上限ぎりぎりの本文を誤って弾かないことも確かめる。
     const filler = 'a'.repeat(
-      MAX_REQUEST_BODY_BYTES - JSON.stringify({ turnstileToken: '' }).length,
+      GENERIC_BODY_LIMIT_BYTES - JSON.stringify({ turnstileToken: '' }).length,
     )
 
     const response = await harness.app.request('/api/guest/start', {

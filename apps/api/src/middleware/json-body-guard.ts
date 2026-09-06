@@ -4,10 +4,20 @@ import { bodyLimit } from 'hono/body-limit'
 import type { AppEnv } from './request-context'
 
 /**
- * 受け付けるリクエストボディの上限。
- * Phase 1のAPIはどれも数百バイトで足りるため、余裕を見ても64KiBで十分。
+ * 取り込み以外のリクエストボディの上限。
+ * カード1枚の本文は最大20,000文字で、余裕を見て1MiBとする。
  */
-export const MAX_REQUEST_BODY_BYTES = 64 * 1024
+export const GENERIC_BODY_LIMIT_BYTES = 1024 * 1024
+
+/**
+ * 一括取り込みのボディ上限。
+ * 契約は payload を1,000,000文字まで許す。日本語のような多バイト文字だと
+ * 1文字3バイトになるため、1MiBでは契約上妥当な入力を弾いてしまう。
+ */
+export const IMPORT_BODY_LIMIT_BYTES = 10 * 1024 * 1024
+
+/** 一括取り込みの経路。ここだけ上限を引き上げる。 */
+const IMPORT_PATH_PATTERN = /^\/api\/decks\/[^/]+\/import$/
 
 /** ボディを伴い得るメソッド。これ以外は素通しする。 */
 const BODY_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH'])
@@ -26,15 +36,20 @@ const JSON_CONTENT_TYPE_PATTERN =
  * Content-Type違反と過大なボディを、500ではなく
  * 日本語の `VALIDATION_FAILED` として返す。
  */
-export function jsonBodyGuard(): MiddlewareHandler<AppEnv> {
-  const limit = bodyLimit({
-    maxSize: MAX_REQUEST_BODY_BYTES,
+function createLimit(maxSize: number) {
+  return bodyLimit({
+    maxSize,
     onError: () => {
       throw new AppError('VALIDATION_FAILED', {
-        publicMessage: `リクエストの内容が大きすぎます。${MAX_REQUEST_BODY_BYTES / 1024}KB以下にしてください。`,
+        publicMessage: `リクエストの内容が大きすぎます。${Math.floor(maxSize / (1024 * 1024))}MB以下にしてください。`,
       })
     },
   })
+}
+
+export function jsonBodyGuard(): MiddlewareHandler<AppEnv> {
+  const genericLimit = createLimit(GENERIC_BODY_LIMIT_BYTES)
+  const importLimit = createLimit(IMPORT_BODY_LIMIT_BYTES)
 
   return async (context, next) => {
     if (!BODY_METHODS.has(context.req.method)) {
@@ -52,6 +67,10 @@ export function jsonBodyGuard(): MiddlewareHandler<AppEnv> {
           'リクエストの形式が不正です。Content-Type に application/json を指定してください。',
       })
     }
+
+    const limit = IMPORT_PATH_PATTERN.test(context.req.path)
+      ? importLimit
+      : genericLimit
 
     return limit(context, next)
   }
