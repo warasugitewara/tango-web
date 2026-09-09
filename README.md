@@ -8,6 +8,19 @@ FSRS ベースの間隔反復学習 Web アプリ。日本語 UI、`Asia/Tokyo` 
 - 実装計画: `docs/superpowers/plans/2026-08-01-tango-implementation-index.md`
 - Phase 1 レビューパケット: `docs/reviews/phase-1-review.md`
 
+## 現状でできること
+
+プレリリースとして `https://tango.warasugi.com` で稼働している。
+
+- ゲストとして即開始できる（Cloudflare Turnstile を通す。ログインは不要）
+- 単語帳とカードの作成・編集・削除（削除は論理削除。復元UIは未実装）
+- JSON (`tango.content` v1) と CSV の貼り付け一括取り込み（重複検出はしない）
+- FSRS-6 の出題キューと4段階評価。学習日は 04:00 JST 起点
+- Google / GitHub でログインし、ゲストの学習データを引き継ぐ
+- ログイン済みアカウントへの別プロバイダの明示連携と解除
+
+未実装の項目は `docs/todo/pre-release-deferred.md` にまとめている。
+
 ## 構成
 
 Bun ワークスペースのモノレポ。
@@ -63,6 +76,31 @@ docker compose -f infra/test/compose.yml down
 | `bun run db:auth-schema:check` | 生成スキーマがコミット済みの内容と一致するか検査 |
 
 `packages/db/src/schema/auth.generated.ts` は `auth@1.6.25` の生成物。手で編集せず、再生成してコミットする。
+
+## セキュリティ境界
+
+クライアントを書く場合は次の制約を満たす必要がある。
+
+- **状態を変える要求には二重送信トークンが要る。** `GET /api/security/csrf` でトークンを取り、`X-Tango-CSRF` ヘッダへ載せる。Cookie と一致しなければ 403 になる。安全なメソッドには不要
+- **`Origin` は公開オリジンと完全一致**でなければ 403。`Sec-Fetch-Site: cross-site` も拒否する
+- `/api/auth/*` は Better Auth が自前で origin/CSRF を検証するため、上の検査から除外している
+- **サインインは必ずブラウザから開始する。** Better Auth はサインイン応答で署名済み `state` Cookie を張り、コールバックで突き合わせる。`curl` やサーバ側 `fetch` で開始すると `state_mismatch` で失敗する
+- `POST /api/guest/start` は 10 分あたり 10 回まで。超えると 429。送信元は HMAC の指紋として記録し、生の IP は保存しない
+- 全応答に CSP、`Referrer-Policy`、`X-Content-Type-Options`、`Permissions-Policy`、`Cross-Origin-Opener-Policy` を付ける。HTTPS 配信時のみ HSTS も付ける
+- CSP は Turnstile のために `https://challenges.cloudflare.com` を `script-src` / `connect-src` / `frame-src` へ許可している。ここを削るとゲスト開始が動かなくなる
+
+## OAuth の設定
+
+Google と GitHub のどちらも、**ローカルと本番の両方のリダイレクト URI を登録**する。片方だけだと `redirect_uri_mismatch` になる。
+
+```
+http://localhost:3000/api/auth/callback/google
+https://tango.warasugi.com/api/auth/callback/google
+http://localhost:3000/api/auth/callback/github
+https://tango.warasugi.com/api/auth/callback/github
+```
+
+同じメールアドレスでも暗黙には結び付けない。連携は画面からの明示操作だけで行う。最後の 1 つは解除できない。
 
 ## メンテナンスジョブ
 
