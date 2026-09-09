@@ -4,11 +4,27 @@ import { Link } from 'react-router'
 import { apiClient } from '../api/client'
 import { TurnstileWidget } from '../components/TurnstileWidget'
 
+/** 画面に出すログイン手段。表示名はプロバイダの正式表記に合わせる。 */
+const PROVIDERS = [
+  { id: 'google', label: 'Google' },
+  { id: 'github', label: 'GitHub' },
+] as const
+
+type ProviderId = (typeof PROVIDERS)[number]['id']
+
+/** 連携中のプロバイダを読める名前で並べる。 */
+function linkedLabels(providers: readonly string[]): string {
+  return PROVIDERS.filter((provider) => providers.includes(provider.id))
+    .map((provider) => provider.label)
+    .join('、')
+}
+
 export function DeckListScreen() {
   const queryClient = useQueryClient()
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
   const [deckName, setDeckName] = useState('')
   const [signInError, setSignInError] = useState<string | null>(null)
+  const [linkError, setLinkError] = useState<string | null>(null)
   const session = useQuery({
     queryKey: ['session'],
     queryFn: () => apiClient.session(),
@@ -30,6 +46,18 @@ export function DeckListScreen() {
       await queryClient.invalidateQueries({ queryKey: ['session'] })
     },
   })
+  const unlink = useMutation({
+    mutationFn: (provider: ProviderId) => apiClient.unlinkAccount(provider),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['session'] })
+    },
+    onError: (error: unknown) => {
+      setLinkError(
+        error instanceof Error ? error.message : '連携を解除できませんでした。',
+      )
+    },
+  })
+
   const signOut = useMutation({
     mutationFn: () => apiClient.signOut(),
     onSuccess: async () => {
@@ -97,6 +125,23 @@ export function DeckListScreen() {
     return `今日 復習${review}・新規${queue.remainingNew}`
   }
 
+  /** 連携を開始する。サインインと同じくブラウザから遷移させる。 */
+  const startLink = (provider: ProviderId) => {
+    setLinkError(null)
+    apiClient
+      .linkSocialUrl(provider)
+      .then((url) => {
+        window.location.href = url
+      })
+      .catch((error: unknown) => {
+        setLinkError(
+          error instanceof Error
+            ? error.message
+            : '連携を開始できませんでした。',
+        )
+      })
+  }
+
   if (session.isPending) {
     return <main className="shell">読み込み中…</main>
   }
@@ -134,6 +179,10 @@ export function DeckListScreen() {
     )
   }
 
+  // 型の絞り込みをコールバックまで持ち越すため、先に確定させる。
+  const account = session.data.kind === 'user' ? session.data : null
+  const guest = session.data.kind === 'guest' ? session.data : null
+
   return (
     <main className="shell">
       <header className="page-header">
@@ -146,9 +195,9 @@ export function DeckListScreen() {
         </Link>
       </header>
 
-      {session.data.kind === 'guest' ? (
+      {guest === null ? null : (
         <aside className="guest-warning">
-          <p>{session.data.warning}</p>
+          <p>{guest.warning}</p>
           <p>ログインすると、別のブラウザや端末へ学習データを引き継げます。</p>
           <div className="inline-form">
             <button type="button" onClick={() => startSignIn('google')}>
@@ -160,12 +209,43 @@ export function DeckListScreen() {
           </div>
           {signInError === null ? null : <p role="alert">{signInError}</p>}
         </aside>
-      ) : (
+      )}
+
+      {account === null ? null : (
         <aside className="account-bar">
-          <p>{session.data.user.name}</p>
-          <button type="button" onClick={() => signOut.mutate()}>
-            ログアウト
-          </button>
+          <p>{account.user.name}</p>
+          <p>連携中: {linkedLabels(account.providers)}</p>
+          <div className="inline-form">
+            {PROVIDERS.filter(
+              (provider) => !account.providers.includes(provider.id),
+            ).map((provider) => (
+              <button
+                key={provider.id}
+                type="button"
+                onClick={() => startLink(provider.id)}
+              >
+                {provider.label}を連携
+              </button>
+            ))}
+            {/* 最後の1つを解除するとログイン手段を失うため、複数あるときだけ出す。 */}
+            {account.providers.length < 2
+              ? null
+              : PROVIDERS.filter((provider) =>
+                  account.providers.includes(provider.id),
+                ).map((provider) => (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    onClick={() => unlink.mutate(provider.id)}
+                  >
+                    {provider.label}の連携を解除
+                  </button>
+                ))}
+            <button type="button" onClick={() => signOut.mutate()}>
+              ログアウト
+            </button>
+          </div>
+          {linkError === null ? null : <p role="alert">{linkError}</p>}
         </aside>
       )}
 

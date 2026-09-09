@@ -246,9 +246,14 @@ describe('ログイン導線', () => {
   test('正式ユーザーにはログイン導線を出さず名前を出す', async () => {
     renderScreen(userSession)
 
+    // 連携の操作は出るが、ログインの導線は出ない。
     expect(await screen.findByText('テスト太郎')).toBeDefined()
-    expect(screen.queryByRole('button', { name: /Google/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: /GitHub/ })).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Googleでログイン' }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'GitHubでログイン' }),
+    ).toBeNull()
   })
 
   test('正式ユーザーにはログアウトを出す', async () => {
@@ -317,5 +322,65 @@ describe('当日の残り枚数', () => {
 
     expect(await screen.findByText('英単語')).toBeTruthy()
     expect(screen.queryByText('今日はここまで')).toBeNull()
+  })
+})
+
+describe('アカウント連携', () => {
+  const googleOnly = {
+    authenticated: true,
+    kind: 'user',
+    user: { id: 'user-1', name: 'テスト太郎', image: null },
+    providers: ['google'],
+  }
+
+  const bothProviders = {
+    ...googleOnly,
+    providers: ['google', 'github'],
+  }
+
+  test('未連携のプロバイダにだけ連携ボタンを出す', async () => {
+    renderScreen(googleOnly)
+
+    expect(
+      await screen.findByRole('button', { name: 'GitHubを連携' }),
+    ).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Googleを連携' })).toBeNull()
+  })
+
+  test('連携済みのプロバイダ名を並べて表示する', async () => {
+    renderScreen(bothProviders)
+
+    expect(await screen.findByText(/連携中: Google、GitHub/)).toBeDefined()
+  })
+
+  test('連携が1つだけなら解除を出さない', async () => {
+    // 最後の1つを解除するとログイン手段を失う。押せないボタンは見せない。
+    renderScreen(googleOnly)
+
+    await screen.findByRole('button', { name: 'GitHubを連携' })
+    expect(screen.queryByRole('button', { name: /解除/ })).toBeNull()
+  })
+
+  test('連携が2つあれば解除を出す', async () => {
+    renderScreen(bothProviders)
+
+    expect(
+      await screen.findByRole('button', { name: 'Googleの連携を解除' }),
+    ).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'GitHubの連携を解除' }),
+    ).toBeDefined()
+  })
+
+  test('ゲストには連携の操作を出さない', async () => {
+    renderScreen({
+      authenticated: true,
+      kind: 'guest',
+      expiresAt: '2026-11-19T12:00:00+09:00',
+      warning: 'Cookieを削除すると復元できません。',
+    })
+
+    await screen.findByRole('heading', { name: '単語帳' })
+    expect(screen.queryByRole('button', { name: /連携/ })).toBeNull()
   })
 })

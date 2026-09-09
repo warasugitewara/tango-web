@@ -390,6 +390,30 @@ export const apiClient = {
     }
     return body.url
   },
+  /**
+   * 既にログイン済みのアカウントへ別のプロバイダを結び付ける。
+   * 暗黙のリンクは無効なので、この明示操作だけが連携の入口になる。
+   */
+  async linkSocialUrl(provider: 'google' | 'github'): Promise<string> {
+    const body = await request('/api/auth/link-social', {
+      method: 'POST',
+      body: JSON.stringify({ provider, callbackURL: '/auth/complete' }),
+    })
+    if (!isRecord(body) || typeof body.url !== 'string') {
+      throw new ApiClientError(
+        'INVALID_RESPONSE',
+        '連携を開始できませんでした。',
+      )
+    }
+    return body.url
+  },
+  /** 連携を解除する。最後の1つはサーバ側が拒否する。 */
+  async unlinkAccount(provider: 'google' | 'github'): Promise<void> {
+    await request('/api/auth/unlink-account', {
+      method: 'POST',
+      body: JSON.stringify({ providerId: provider }),
+    })
+  },
   /** ゲストから正式アカウントへの引き継ぎを確定する。 */
   async completeIdentity(mergeKey: string): Promise<void> {
     await request('/api/identity/complete', {
