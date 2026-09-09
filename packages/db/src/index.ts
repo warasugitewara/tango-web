@@ -31,6 +31,10 @@ export {
   type PurgeExpiredGuestsResult,
 } from './repositories/principal-repository'
 export {
+  createRateLimitRepository,
+  type RateLimitRepository,
+} from './repositories/rate-limit-repository'
+export {
   type AppliedSchedule,
   CardNotFoundError,
   type CountInput,

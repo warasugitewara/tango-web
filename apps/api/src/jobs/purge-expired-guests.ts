@@ -1,5 +1,9 @@
-import type { PrincipalRepository } from '@tango/db'
-import { createDatabase, createPrincipalRepository } from '@tango/db'
+import type { PrincipalRepository, RateLimitRepository } from '@tango/db'
+import {
+  createDatabase,
+  createPrincipalRepository,
+  createRateLimitRepository,
+} from '@tango/db'
 import { AppError, parseJstInstant, toSafeErrorName } from '@tango/shared'
 import { v7 as uuidv7 } from 'uuid'
 import { loadEnv, resolveDatabaseUrl } from '../env'
@@ -19,12 +23,24 @@ export type PurgeSummary = {
   batches: number
   /** 上限に達して未処理が残っている可能性がある場合に true。 */
   truncated: boolean
+  /** 併せて掃除した濫用対策の記録件数。 */
+  deletedRateLimitHits: number
 }
 
 export type PurgeDependencies = {
   repository: PrincipalRepository
   clock: Clock
+  /**
+   * 濫用対策の記録の掃除先。
+   * 専用のcronを増やさず、このジョブへ相乗りさせる。
+   */
+  rateLimitRepository?: RateLimitRepository
+  /** この期間より古い濫用対策の記録を消す。 */
+  rateLimitRetentionMs?: number
 }
+
+/** 判定の窓を超えた記録は残す意味がない。既定はゲスト開始の窓と同じ。 */
+const DEFAULT_RATE_LIMIT_RETENTION_MS = 10 * 60 * 1000
 
 /**
  * 期限切れゲストを有限ループで削除する。
@@ -37,6 +53,15 @@ export async function purgeExpiredGuests(
   let deletedPrincipals = 0
   let batches = 0
 
+  const retentionMs =
+    dependencies.rateLimitRetentionMs ?? DEFAULT_RATE_LIMIT_RETENTION_MS
+  const deletedRateLimitHits =
+    dependencies.rateLimitRepository === undefined
+      ? 0
+      : await dependencies.rateLimitRepository.purgeBefore(
+          new Date(now.getTime() - retentionMs),
+        )
+
   for (let batch = 0; batch < MAX_BATCHES; batch += 1) {
     const result = await dependencies.repository.purgeExpiredGuests({
       now,
@@ -47,11 +72,16 @@ export async function purgeExpiredGuests(
     deletedPrincipals += result.deletedPrincipals
 
     if (result.deletedPrincipals < BATCH_SIZE) {
-      return { deletedPrincipals, batches, truncated: false }
+      return {
+        deletedPrincipals,
+        batches,
+        truncated: false,
+        deletedRateLimitHits,
+      }
     }
   }
 
-  return { deletedPrincipals, batches, truncated: true }
+  return { deletedPrincipals, batches, truncated: true, deletedRateLimitHits }
 }
 
 /** このCLIが受け付ける唯一のオプション。 */
@@ -126,6 +156,7 @@ async function main(): Promise<void> {
   try {
     const summary = await purgeExpiredGuests({
       repository: createPrincipalRepository(database.db),
+      rateLimitRepository: createRateLimitRepository(database.db),
       clock,
     })
 

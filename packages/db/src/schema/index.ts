@@ -3,5 +3,6 @@
 export * from './audit'
 export * from './auth.generated'
 export * from './content'
+export * from './operations'
 export * from './principals'
 export * from './study'

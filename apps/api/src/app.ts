@@ -1,6 +1,10 @@
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { ContentRepository, StudyRepository } from '@tango/db'
+import type {
+  ContentRepository,
+  RateLimitRepository,
+  StudyRepository,
+} from '@tango/db'
 import { AppError } from '@tango/shared'
 import { Hono } from 'hono'
 import { serveStatic } from 'hono/serve-static'
@@ -16,12 +20,17 @@ import { createStudyService } from './features/study/study-service'
 import { createCsrfRoutes, originGuard } from './middleware/csrf'
 import { errorHandler } from './middleware/error-handler'
 import { jsonBodyGuard } from './middleware/json-body-guard'
+import { GUEST_START_BUCKET, rateLimit } from './middleware/rate-limit'
 import {
   type AppEnv,
   requestContext,
   requestId,
 } from './middleware/request-context'
 import { securityHeaders } from './middleware/security-headers'
+
+/** ゲスト開始の制限。10分あたり10回まで。 */
+const GUEST_START_LIMIT = 10
+const GUEST_START_WINDOW_MS = 10 * 60 * 1000
 
 export type AppDependencies = {
   clock: Clock
@@ -34,6 +43,10 @@ export type AppDependencies = {
   cookieSecure: boolean
   /** 状態を変える要求に対して完全一致で要求する公開オリジン。 */
   appOrigin: string
+  /** ゲスト開始の濫用対策。省略すると制限をかけない。 */
+  rateLimitRepository?: RateLimitRepository
+  /** 送信元の指紋を作るペッパー。`rateLimitRepository` と同時に渡す。 */
+  rateLimitPepper?: string
   /** 認証境界だけを検証する既存テストでは省略できる。 */
   contentRepository?: ContentRepository
   studyRepository?: StudyRepository
@@ -95,6 +108,24 @@ export function createApp(deps: AppDependencies) {
       secureOrigin: deps.cookieSecure,
     }),
   )
+
+  // 濫用要求を文脈解決やTurnstile検証へ届かせない。
+  if (
+    deps.rateLimitRepository !== undefined &&
+    deps.rateLimitPepper !== undefined
+  ) {
+    app.use(
+      '/api/guest/start',
+      rateLimit({
+        repository: deps.rateLimitRepository,
+        bucket: GUEST_START_BUCKET,
+        limit: GUEST_START_LIMIT,
+        windowMs: GUEST_START_WINDOW_MS,
+        fingerprintPepper: deps.rateLimitPepper,
+        now: () => new Date(deps.clock.now().epochMilliseconds),
+      }),
+    )
+  }
 
   // Better Authは自前のボディ検証を持つため、その委譲より後ろに置く。
   app.use('/api/*', jsonBodyGuard())

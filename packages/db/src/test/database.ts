@@ -108,6 +108,7 @@ const MIGRATIONS_FOLDER = resolve(
 
 /** TRUNCATE対象。外部キー順序に依存しないようCASCADEを使う。 */
 const RESETTABLE_TABLES = [
+  'rate_limit_hits',
   'review_events',
   'study_sessions',
   'card_schedules',

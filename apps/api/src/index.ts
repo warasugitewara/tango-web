@@ -2,6 +2,7 @@ import {
   createContentRepository,
   createDatabase,
   createPrincipalRepository,
+  createRateLimitRepository,
   createStudyRepository,
 } from '@tango/db'
 import { createApp } from './app'
@@ -85,6 +86,9 @@ const app = createApp({
   authHandler: (request) => auth.handler(request),
   cookieSecure,
   appOrigin: env.APP_ORIGIN,
+  rateLimitRepository: createRateLimitRepository(database.db),
+  // 送信元の指紋はゲストトークンと同じペッパーで作る。生IPは保存しない。
+  rateLimitPepper: guestTokenPepper,
   contentRepository: createContentRepository(database.db),
   studyRepository: createStudyRepository(database.db),
   fsrsScheduler: createFsrsScheduler(DEFAULT_REQUEST_RETENTION),

@@ -1,3 +1,4 @@
+import type { RateLimitRepository } from '@tango/db'
 import {
   type ApiErrorEnvelope,
   AppError,
@@ -40,6 +41,8 @@ function createHarness(options: {
   cookieSecure?: boolean
   /** ゲスト解決時にDB側の期限を延長できたことにするか。 */
   guestRefreshed?: boolean
+  /** 濫用対策を有効にする場合だけ渡す。 */
+  rateLimitRepository?: RateLimitRepository
 }): Harness {
   const turnstileValid = options.turnstileValid ?? true
   const formalSession = options.formalSession ?? null
@@ -111,6 +114,12 @@ function createHarness(options: {
     authHandler: async () => new Response(null, { status: 204 }),
     cookieSecure: options.cookieSecure ?? true,
     appOrigin: 'https://tango.warasugi.com',
+    ...(options.rateLimitRepository === undefined
+      ? {}
+      : {
+          rateLimitRepository: options.rateLimitRepository,
+          rateLimitPepper: 'test-pepper',
+        }),
   })
 
   return { app, startCalls }
@@ -590,5 +599,66 @@ describe('request context and error handling', () => {
     expect(raw).not.toContain('secret')
     expect(raw).not.toContain('10.0.0.5')
     expect(raw).not.toContain('postgres://')
+  })
+})
+
+describe('ゲスト開始の濫用対策', () => {
+  /** 記録を数え上げるだけの、その場限りのリポジトリ。 */
+  function createRateLimitRepository() {
+    let count = 0
+    return {
+      async countSince() {
+        return count
+      },
+      async record() {
+        count += 1
+      },
+      async purgeBefore() {
+        return 0
+      },
+    }
+  }
+
+  function startGuest(app: ReturnType<typeof createApp>) {
+    return app.request('/api/guest/start', {
+      method: 'POST',
+      headers: mutationHeaders([], {
+        'content-type': 'application/json',
+        'cf-connecting-ip': '203.0.113.7',
+      }),
+      body: JSON.stringify({ turnstileToken: 'valid-token' }),
+    })
+  }
+
+  test('10分あたり10回を超えたら429で拒否する', async () => {
+    const harness = createHarness({
+      rateLimitRepository: createRateLimitRepository(),
+    })
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      expect((await startGuest(harness.app)).status).toBe(200)
+    }
+
+    const blocked = await startGuest(harness.app)
+    expect(blocked.status).toBe(429)
+
+    const body = await readErrorEnvelope(blocked)
+    expect(body).toMatchObject({ error: { code: 'RATE_LIMITED' } })
+  })
+
+  test('拒否された要求はゲスト発行処理まで届かない', async () => {
+    // 濫用要求でTurnstile検証やDB書き込みを走らせ続けないようにする。
+    const harness = createHarness({
+      rateLimitRepository: createRateLimitRepository(),
+    })
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await startGuest(harness.app)
+    }
+
+    const before = harness.startCalls.length
+    await startGuest(harness.app)
+
+    expect(harness.startCalls.length).toBe(before)
   })
 })

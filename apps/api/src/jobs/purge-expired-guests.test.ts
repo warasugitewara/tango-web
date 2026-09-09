@@ -1,6 +1,11 @@
+import { Temporal } from '@js-temporal/polyfill'
 import { AppError } from '@tango/shared'
 import { describe, expect, test } from 'vitest'
-import { resolveClock, toPurgeFailureLog } from './purge-expired-guests'
+import {
+  purgeExpiredGuests,
+  resolveClock,
+  toPurgeFailureLog,
+} from './purge-expired-guests'
 
 /** ログへ出てはならない値。実際の障害で例外メッセージに混ざり得るものを並べる。 */
 const SECRET_CONNECTION_URL = 'postgres://tango:s3cret@10.0.0.5:5432/tango'
@@ -164,5 +169,51 @@ describe('toPurgeFailureLog', () => {
 
     expect(record.errorName).toBe('Error')
     expect(JSON.stringify(record)).not.toContain('s3cret')
+  })
+})
+
+describe('purgeExpiredGuests', () => {
+  const NOW = Temporal.Instant.from('2026-09-09T03:00:00Z')
+
+  function createRepository() {
+    return {
+      async purgeExpiredGuests() {
+        return { deletedPrincipals: 0 }
+      },
+    }
+  }
+
+  test('濫用対策の古い記録も同じ実行で掃除する', async () => {
+    // 掃除用のcronを増やさず、既存のジョブへ相乗りさせる。
+    const purged: Date[] = []
+
+    const summary = await purgeExpiredGuests({
+      repository: createRepository() as never,
+      clock: { now: () => NOW },
+      rateLimitRepository: {
+        async countSince() {
+          return 0
+        },
+        async record() {},
+        async purgeBefore(before) {
+          purged.push(before)
+          return 3
+        },
+      },
+      rateLimitRetentionMs: 10 * 60 * 1000,
+    })
+
+    expect(summary.deletedRateLimitHits).toBe(3)
+    expect(purged).toHaveLength(1)
+    expect(purged[0]?.getTime()).toBe(NOW.epochMilliseconds - 10 * 60 * 1000)
+  })
+
+  test('濫用対策のリポジトリが無ければ掃除しない', async () => {
+    const summary = await purgeExpiredGuests({
+      repository: createRepository() as never,
+      clock: { now: () => NOW },
+    })
+
+    expect(summary.deletedRateLimitHits).toBe(0)
   })
 })
