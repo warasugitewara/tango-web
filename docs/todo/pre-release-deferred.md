@@ -62,6 +62,36 @@
 
 **人に使ってもらう前にバックアップが動いている必要がある。** 5 を後回しにしたまま利用者を増やさない。
 
+
+## 次の実装: ゴミ箱の復元（2026-09-10 に設計承認済み）
+
+`trashDeck` / `trashCard` はあるが復元手段がまったくない。列 `trashed_at` は既にあるため、読み書きを足すだけで塞げる。
+
+**リポジトリ**（`packages/db/src/repositories/content-repository.ts`）
+
+| 追加するもの | 内容 |
+| --- | --- |
+| `listTrashedDecks(principalId, cutoff)` | 保持期限内の削除済みデッキ |
+| `listTrashedCards(principalId, cutoff)` | 削除済みカード。**親デッキが生きているものだけ** |
+| `restoreDeck(principalId, deckId)` | `trashed_at` を null に戻す |
+| `restoreCard(principalId, cardId)` | 同上 |
+
+親デッキごと削除されたカードを一覧に出さないのは、先にデッキを復元すれば中身ごと戻るため。二重に操作させる意味がない。
+
+**API**
+
+```
+GET  /api/trash                        削除済みの一覧
+POST /api/trash/decks/:deckId/restore
+POST /api/trash/cards/:cardId/restore
+```
+
+**UI** — `/trash` を新設し、デッキ一覧からリンクする。各項目に削除日、残り日数、「復元」ボタンを出す。
+
+**保持期限と物理削除** — 上位仕様は 30 日。画面に「30 日で完全に削除されます」と書く以上、実際に消す仕組みが要る。書いておいて消えないのは嘘になるため、既存の `purge-expired-guests` ジョブへ相乗りさせて期限切れを物理削除する（rate limit の掃除と同じやり方）。ジョブ名が「期限切れゲスト」のままで意味がずれる点は、名前を変えず README にジョブの責務を書き足すことで対応する。
+
+**あわせて直すもの** — 削除時の確認文言。現在は「元に戻せません」と出しているが、復元できるようになるので実態と食い違う。`DeckListScreen.tsx` と `DeckDetailScreen.tsx` の `window.confirm` の文言。
+
 ## プレリリースで残す代替策
 
 - 削除は論理削除で行い、画面では戻せないことを確認してから実行する。
