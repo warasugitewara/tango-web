@@ -2,6 +2,7 @@ import { zValidator } from '@hono/zod-validator'
 import {
   AppError,
   reviewSubmitSchema,
+  reviewUndoSchema,
   studySessionCreateSchema,
 } from '@tango/shared'
 import { Hono } from 'hono'
@@ -63,6 +64,17 @@ export function createStudyRoutes(options: { service: StudyService }) {
       zValidator('json', reviewSubmitSchema, validationFailure),
       async (context) => {
         const result = await service.submitReview(
+          requireServiceContext(context),
+          context.req.valid('json'),
+        )
+        return context.json(result)
+      },
+    )
+    .post(
+      '/study/reviews/undo',
+      zValidator('json', reviewUndoSchema, validationFailure),
+      async (context) => {
+        const result = await service.undoLastReview(
           requireServiceContext(context),
           context.req.valid('json'),
         )

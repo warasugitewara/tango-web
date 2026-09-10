@@ -81,8 +81,21 @@ export const reviewSubmitSchema = z
   })
   .strict()
 
+/**
+ * 直前のレビューの取り消し。
+ * どの評価を戻すかはサーバが履歴から決めるため、カードIDは受け取らない。
+ * クライアントの指定を信じると、任意の過去の評価を戻せてしまう。
+ */
+export const reviewUndoSchema = z
+  .object({
+    sessionId: z.uuidv7(),
+    idempotencyKey: z.uuid(),
+  })
+  .strict()
+
 export type PublicRating = z.infer<typeof publicRatingSchema>
 export type FsrsState = z.infer<typeof fsrsStateSchema>
 export type ScheduleSnapshot = z.infer<typeof scheduleSnapshotSchema>
 export type StudySessionCreateInput = z.infer<typeof studySessionCreateSchema>
 export type ReviewSubmitInput = z.infer<typeof reviewSubmitSchema>
+export type ReviewUndoInput = z.infer<typeof reviewUndoSchema>

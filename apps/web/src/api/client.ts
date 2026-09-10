@@ -5,6 +5,7 @@ import type {
   ImportRequest,
   PublicRating,
   ReviewSubmitInput,
+  ReviewUndoInput,
   StudySessionCreateInput,
 } from '@tango/shared'
 
@@ -540,5 +541,14 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(input),
     })
+  },
+  /** 直前の評価を取り消し、取り消した後のセッション状態を受け取る。 */
+  async undoLastReview(input: ReviewUndoInput): Promise<StudySessionView> {
+    return parseStudySession(
+      await request('/api/study/reviews/undo', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    )
   },
 }

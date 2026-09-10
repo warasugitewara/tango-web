@@ -11,6 +11,7 @@ describe('AppError', () => {
     ['NOT_FOUND', 404],
     ['CONFLICT', 409],
     ['STUDY_STATE_CONFLICT', 409],
+    ['UNDO_UNAVAILABLE', 409],
     ['RATE_LIMITED', 429],
     ['INTERNAL_ERROR', 500],
   ] as const)('%s は HTTP %d を返す', (code, status) => {

@@ -18,6 +18,9 @@ export function StudyScreen() {
   const queryClient = useQueryClient()
   const [revealed, setRevealed] = useState(false)
   const pendingIdempotencyKey = useRef<string | null>(null)
+  // 取り消せるのは直前の1手だけ。評価してからボタンを出す。
+  const [canUndo, setCanUndo] = useState(false)
+  const pendingUndoKey = useRef<string | null>(null)
   const queryKey = ['study-session', deckId ?? 'all']
   const session = useQuery({
     queryKey,
@@ -55,6 +58,7 @@ export function StudyScreen() {
     onSuccess: (next) => {
       pendingIdempotencyKey.current = null
       setRevealed(false)
+      setCanUndo(true)
       queryClient.setQueryData(queryKey, next)
     },
     onError: async (error) => {
@@ -70,6 +74,28 @@ export function StudyScreen() {
         setRevealed(false)
         queryClient.setQueryData(queryKey, refreshed)
       }
+    },
+  })
+
+  const undo = useMutation({
+    mutationFn: async () => {
+      const current = session.data
+      if (current === undefined) {
+        throw new Error('取り消せる評価がありません。')
+      }
+      // 通信断で押し直しても二重に戻さないよう、同じ鍵を使い回す。
+      const idempotencyKey = pendingUndoKey.current ?? crypto.randomUUID()
+      pendingUndoKey.current = idempotencyKey
+      return apiClient.undoLastReview({
+        sessionId: current.sessionId,
+        idempotencyKey,
+      })
+    },
+    onSuccess: (next) => {
+      pendingUndoKey.current = null
+      setCanUndo(false)
+      setRevealed(false)
+      queryClient.setQueryData(queryKey, next)
     },
   })
 
@@ -158,6 +184,23 @@ export function StudyScreen() {
           答えを見る
         </button>
       )}
+
+      {canUndo ? (
+        <button
+          className="undo-button"
+          type="button"
+          disabled={undo.isPending}
+          onClick={() => undo.mutate()}
+        >
+          取り消す
+        </button>
+      ) : null}
+
+      {undo.isError ? (
+        <p className="form-error" role="alert">
+          {undo.error.message}
+        </p>
+      ) : null}
 
       {review.isError &&
       !(

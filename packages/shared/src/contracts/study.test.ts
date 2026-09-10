@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import {
   publicRatingSchema,
   reviewSubmitSchema,
+  reviewUndoSchema,
   scheduleSnapshotSchema,
   studySessionCreateSchema,
 } from './study'
@@ -151,5 +152,30 @@ describe('scheduleSnapshotSchema', () => {
       scheduleSnapshotSchema.safeParse({ ...snapshot, state: 'archived' })
         .success,
     ).toBe(false)
+  })
+})
+
+describe('reviewUndoSchema', () => {
+  const baseUndo = { sessionId: SESSION_ID, idempotencyKey: UUID_V4 }
+
+  test('セッションと冪等キーだけを受け付ける', () => {
+    expect(reviewUndoSchema.parse(baseUndo).sessionId).toBe(SESSION_ID)
+  })
+
+  test('カードIDを受け取らない', () => {
+    // どの評価を戻すかはサーバが履歴から決める。
+    const withCard = { ...baseUndo, cardId: CARD_ID }
+    expect(reviewUndoSchema.safeParse(withCard).success).toBe(false)
+  })
+
+  test('冪等キーの欠落を拒否する', () => {
+    expect(reviewUndoSchema.safeParse({ sessionId: SESSION_ID }).success).toBe(
+      false,
+    )
+  })
+
+  test('UUIDv7でないセッションIDを拒否する', () => {
+    const withV4 = { ...baseUndo, sessionId: UUID_V4 }
+    expect(reviewUndoSchema.safeParse(withV4).success).toBe(false)
   })
 })

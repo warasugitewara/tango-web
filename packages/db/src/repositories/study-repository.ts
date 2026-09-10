@@ -1,9 +1,14 @@
-import { and, asc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { v7 as uuidv7 } from 'uuid'
 import type { Database, DatabaseTransaction } from '../client'
 import { cards, decks } from '../schema/content'
-import type { FsrsStateValue } from '../schema/study'
-import { cardSchedules, reviewEvents, studySessions } from '../schema/study'
+import type { FsrsStateValue, ScheduleSnapshotJson } from '../schema/study'
+import {
+  cardSchedules,
+  FSRS_STATES,
+  reviewEvents,
+  studySessions,
+} from '../schema/study'
 
 export type Rating = 1 | 2 | 3 | 4
 
@@ -109,6 +114,21 @@ export type SubmitReviewInput = {
   responseDurationMs?: number
 }
 
+export type UndoLastReviewInput = {
+  principalId: string
+  sessionId: string
+  idempotencyKey: string
+  now: Date
+  learningDay: string
+}
+
+export type UndoOutcome = {
+  /** 新たに取り消したなら真。冪等キーの再送なら偽。 */
+  applied: boolean
+  cardId: string
+  schedule: ScheduleRow
+}
+
 export type ReviewOutcome = {
   /** 新たに適用したなら真。冪等キーの再送なら偽。 */
   applied: boolean
@@ -120,6 +140,14 @@ export class StudyStateConflictError extends Error {
   constructor() {
     super('学習状態が更新されています。')
     this.name = 'StudyStateConflictError'
+  }
+}
+
+/** 取り消せる評価がない。呼び出し側は409へ写像する。 */
+export class UndoUnavailableError extends Error {
+  constructor() {
+    super('取り消せる評価がありません。')
+    this.name = 'UndoUnavailableError'
   }
 }
 
@@ -144,6 +172,7 @@ export interface StudyRepository {
   countRemaining(input: CountInput): Promise<RemainingCounts>
   countDeckQueues(input: DeckQueueInput): Promise<readonly DeckQueueCounts[]>
   submitReview(input: SubmitReviewInput): Promise<ReviewOutcome>
+  undoLastReview(input: UndoLastReviewInput): Promise<UndoOutcome>
 }
 
 function toScheduleRow(row: typeof cardSchedules.$inferSelect): ScheduleRow {
@@ -258,7 +287,19 @@ export function createStudyRepository(db: Database): StudyRepository {
     }
 
     const rows = await db
-      .select({ deckId: cards.deckId, value: sql<number>`count(*)::int` })
+      .select({
+        deckId: cards.deckId,
+        // 取り消した分は枠を戻す。追記専用の履歴から差し引きで導出する。
+        value: sql<number>`sum(
+          case
+            when ${reviewEvents.kind} = 'review'
+              and ${reviewEvents.beforeSnapshot} ->> 'state' = 'new' then 1
+            when ${reviewEvents.kind} = 'undo'
+              and ${reviewEvents.afterSnapshot} ->> 'state' = 'new' then -1
+            else 0
+          end
+        )::int`,
+      })
       .from(reviewEvents)
       .innerJoin(cards, eq(cards.id, reviewEvents.cardId))
       .where(
@@ -266,7 +307,6 @@ export function createStudyRepository(db: Database): StudyRepository {
           eq(reviewEvents.principalId, principalId),
           eq(reviewEvents.learningDay, learningDay),
           inArray(cards.deckId, [...deckIds]),
-          sql`${reviewEvents.beforeSnapshot} ->> 'state' = 'new'`,
         ),
       )
       .groupBy(cards.deckId)
@@ -643,6 +683,154 @@ export function createStudyRepository(db: Database): StudyRepository {
         return { applied: true, schedule: after }
       })
     },
+
+    async undoLastReview(input) {
+      return db.transaction(async (tx) => {
+        // 1. 冪等キーの再送は、履歴をたどる前に記録済みの結果を返す。
+        const [recorded] = await tx
+          .select({ cardId: reviewEvents.cardId })
+          .from(reviewEvents)
+          .where(
+            and(
+              eq(reviewEvents.principalId, input.principalId),
+              eq(reviewEvents.idempotencyKey, input.idempotencyKey),
+            ),
+          )
+          .limit(1)
+
+        if (recorded !== undefined) {
+          const [current] = await tx
+            .select()
+            .from(cardSchedules)
+            .where(eq(cardSchedules.cardId, recorded.cardId))
+            .limit(1)
+
+          if (current === undefined) {
+            throw new CardNotFoundError()
+          }
+
+          return {
+            applied: false,
+            cardId: recorded.cardId,
+            schedule: toScheduleRow(current),
+          }
+        }
+
+        // 2. 他人のセッションを取り消せないよう、所有者ごと確かめる。
+        const [session] = await tx
+          .select({ id: studySessions.id })
+          .from(studySessions)
+          .where(
+            and(
+              eq(studySessions.id, input.sessionId),
+              eq(studySessions.principalId, input.principalId),
+            ),
+          )
+          .limit(1)
+
+        if (session === undefined) {
+          throw new CardNotFoundError()
+        }
+
+        // 3. セッションの直近1件だけを見る。それが評価でなければ戻せない。
+        // 取り消しの直後に再び取り消す操作も、ここで止まる。
+        const [latest] = await tx
+          .select()
+          .from(reviewEvents)
+          .where(eq(reviewEvents.sessionId, input.sessionId))
+          .orderBy(desc(reviewEvents.createdAt), desc(reviewEvents.id))
+          .limit(1)
+
+        if (latest === undefined || latest.kind !== 'review') {
+          throw new UndoUnavailableError()
+        }
+
+        // 4. 対象カードのスケジュールを所有者込みでロックする。
+        const locked = await tx
+          .select({ schedule: cardSchedules })
+          .from(cardSchedules)
+          .innerJoin(cards, eq(cards.id, cardSchedules.cardId))
+          .innerJoin(decks, eq(decks.id, cards.deckId))
+          .where(
+            and(
+              eq(cardSchedules.cardId, latest.cardId),
+              eq(decks.principalId, input.principalId),
+              isNull(decks.trashedAt),
+              isNull(cards.trashedAt),
+            ),
+          )
+          .for('update', { of: cardSchedules })
+          .limit(1)
+
+        const current = locked[0]?.schedule
+
+        if (current === undefined) {
+          throw new CardNotFoundError()
+        }
+
+        // 5. 別のセッションが同じカードを進めていたら戻さない。
+        // 記録した直後の版と今の版が一致することを、ロック後に確かめる。
+        const restored = fromSnapshotJson(latest.beforeSnapshot)
+        const appliedVersion = readVersion(latest.afterSnapshot)
+
+        if (current.version !== appliedVersion) {
+          throw new UndoUnavailableError()
+        }
+
+        // 6. 版は巻き戻さず前へ進める。
+        // 戻すと、古い版を握った並行要求がそのまま通ってしまう。
+        const nextVersion = current.version + 1
+
+        await tx
+          .update(cardSchedules)
+          .set({
+            dueAt: restored.dueAt,
+            stability: restored.stability,
+            difficulty: restored.difficulty,
+            elapsedDays: restored.elapsedDays,
+            scheduledDays: restored.scheduledDays,
+            learningSteps: restored.learningSteps,
+            reps: restored.reps,
+            lapses: restored.lapses,
+            state: restored.state,
+            lastReviewAt: restored.lastReviewAt,
+            version: nextVersion,
+            schedulerVersion: restored.schedulerVersion,
+            requestRetention: restored.requestRetention,
+            updatedAt: input.now,
+          })
+          .where(eq(cardSchedules.cardId, latest.cardId))
+
+        const before = toScheduleRow(current)
+        const after: ScheduleRow = {
+          ...restored,
+          cardId: latest.cardId,
+          version: nextVersion,
+        }
+
+        // 7. 評価は消さず、打ち消しを追記する。履歴は追記専用のまま。
+        await tx.insert(reviewEvents).values({
+          id: uuidv7(),
+          principalId: input.principalId,
+          cardId: latest.cardId,
+          sessionId: input.sessionId,
+          rating: latest.rating,
+          kind: 'undo',
+          beforeSnapshot: toSnapshotJson(before),
+          afterSnapshot: toSnapshotJson(after),
+          reviewedAt: input.now,
+          learningDay: input.learningDay,
+          idempotencyKey: input.idempotencyKey,
+        })
+
+        await tx
+          .update(studySessions)
+          .set({ lastActiveAt: input.now })
+          .where(eq(studySessions.id, input.sessionId))
+
+        return { applied: true, cardId: latest.cardId, schedule: after }
+      })
+    },
   }
 }
 
@@ -664,5 +852,78 @@ function toSnapshotJson(row: ScheduleRow): Readonly<Record<string, unknown>> {
     version: row.version,
     schedulerVersion: row.schedulerVersion,
     requestRetention: row.requestRetention,
+  }
+}
+
+/** 保存済みの状態名が現在の定義に含まれるかを判定する。 */
+function isFsrsState(value: unknown): value is FsrsStateValue {
+  return (
+    typeof value === 'string' &&
+    FSRS_STATES.some((candidate) => candidate === value)
+  )
+}
+
+/** 履歴に残した値を読み戻す。壊れていれば復元しない。 */
+function snapshotOf(value: ScheduleSnapshotJson, key: string): unknown {
+  return value[key]
+}
+
+function readFiniteNumber(value: ScheduleSnapshotJson, key: string): number {
+  const found = snapshotOf(value, key)
+  if (typeof found !== 'number' || !Number.isFinite(found)) {
+    throw new Error(`レビュー履歴の ${key} を読み取れません。`)
+  }
+  return found
+}
+
+function readInstant(value: ScheduleSnapshotJson, key: string): Date {
+  const found = snapshotOf(value, key)
+  if (typeof found !== 'string') {
+    throw new Error(`レビュー履歴の ${key} を読み取れません。`)
+  }
+  const parsed = new Date(found)
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`レビュー履歴の ${key} を読み取れません。`)
+  }
+  return parsed
+}
+
+function readVersion(value: ScheduleSnapshotJson): number {
+  return readFiniteNumber(value, 'version')
+}
+
+/**
+ * 追記した before/after のスナップショットを復元する。
+ * ライブラリの型ではなく、保存した形をそのまま検査する。
+ */
+function fromSnapshotJson(
+  value: ScheduleSnapshotJson,
+): Omit<ScheduleRow, 'cardId' | 'version'> {
+  const state = snapshotOf(value, 'state')
+  if (!isFsrsState(state)) {
+    throw new Error('レビュー履歴の state を読み取れません。')
+  }
+
+  const schedulerVersion = snapshotOf(value, 'schedulerVersion')
+  if (typeof schedulerVersion !== 'string') {
+    throw new Error('レビュー履歴の schedulerVersion を読み取れません。')
+  }
+
+  const lastReviewAt = snapshotOf(value, 'lastReviewAt')
+
+  return {
+    dueAt: readInstant(value, 'dueAt'),
+    stability: readFiniteNumber(value, 'stability'),
+    difficulty: readFiniteNumber(value, 'difficulty'),
+    elapsedDays: readFiniteNumber(value, 'elapsedDays'),
+    scheduledDays: readFiniteNumber(value, 'scheduledDays'),
+    learningSteps: readFiniteNumber(value, 'learningSteps'),
+    reps: readFiniteNumber(value, 'reps'),
+    lapses: readFiniteNumber(value, 'lapses'),
+    state,
+    lastReviewAt:
+      lastReviewAt === null ? null : readInstant(value, 'lastReviewAt'),
+    schedulerVersion,
+    requestRetention: readFiniteNumber(value, 'requestRetention'),
   }
 }

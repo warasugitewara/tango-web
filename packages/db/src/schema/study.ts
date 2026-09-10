@@ -23,6 +23,13 @@ export const FSRS_STATES = ['new', 'learning', 'review', 'relearning'] as const
 export type FsrsStateValue = (typeof FSRS_STATES)[number]
 
 export const STUDY_SESSION_MODES = ['all', 'selected'] as const
+
+/**
+ * レビュー履歴に載る行の種類。
+ * `undo` は直前の評価を打ち消す補正イベントで、集計では評価として数えない。
+ */
+export const REVIEW_EVENT_KINDS = ['review', 'undo'] as const
+export type ReviewEventKind = (typeof REVIEW_EVENT_KINDS)[number]
 export type StudySessionMode = (typeof STUDY_SESSION_MODES)[number]
 
 export type ScheduleSnapshotJson = Readonly<Record<string, unknown>>
@@ -122,6 +129,8 @@ export const reviewEvents = pgTable(
       .notNull()
       .references(() => studySessions.id, { onDelete: 'cascade' }),
     rating: integer('rating').notNull(),
+    /** 既定は通常の評価。既存行はすべて `review` として扱われる。 */
+    kind: text('kind').$type<ReviewEventKind>().notNull().default('review'),
     beforeSnapshot: jsonb('before_snapshot')
       .$type<ScheduleSnapshotJson>()
       .notNull(),
@@ -139,11 +148,17 @@ export const reviewEvents = pgTable(
   },
   (table) => [
     check('review_events_rating_check', sql`${table.rating} between 1 and 4`),
+    check('review_events_kind_check', sql`${table.kind} in ('review', 'undo')`),
     uniqueIndex('review_events_principal_idempotency_uidx').on(
       table.principalId,
       table.idempotencyKey,
     ),
     index('review_events_card_id_idx').on(table.cardId),
+    // 取り消しは「そのセッションの直近の評価」を1件だけ探す。
+    index('review_events_session_created_at_idx').on(
+      table.sessionId,
+      table.createdAt,
+    ),
     // 当日の新規枚数を学習日で絞って数える。
     index('review_events_principal_learning_day_idx').on(
       table.principalId,

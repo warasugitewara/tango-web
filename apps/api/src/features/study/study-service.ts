@@ -1,11 +1,16 @@
 import { Temporal } from '@js-temporal/polyfill'
 import type { AppliedSchedule, ScheduleRow, StudyRepository } from '@tango/db'
-import { CardNotFoundError, StudyStateConflictError } from '@tango/db'
+import {
+  CardNotFoundError,
+  StudyStateConflictError,
+  UndoUnavailableError,
+} from '@tango/db'
 import {
   AppError,
   formatJst,
   learningDayOf,
   type ReviewSubmitInput,
+  type ReviewUndoInput,
   type ServiceContext,
   type StudySessionCreateInput,
 } from '@tango/shared'
@@ -115,6 +120,11 @@ export interface StudyService {
     context: ServiceContext,
     input: ReviewSubmitInput,
   ): Promise<{ schedule: ReturnType<typeof toScheduleView> }>
+  /** 直前の評価を取り消し、取り消した後のセッション状態を返す。 */
+  undoLastReview(
+    context: ServiceContext,
+    input: ReviewUndoInput,
+  ): Promise<StudySessionView>
 }
 
 export function createStudyService(options: {
@@ -234,6 +244,28 @@ export function createStudyService(options: {
         }
         throw error
       }
+    },
+    async undoLastReview(context, input) {
+      try {
+        await repository.undoLastReview({
+          principalId: context.actor.principalId,
+          sessionId: input.sessionId,
+          idempotencyKey: input.idempotencyKey,
+          now: toDate(context.now),
+          learningDay: learningDayOf(context.now),
+        })
+      } catch (error) {
+        if (error instanceof UndoUnavailableError) {
+          throw new AppError('UNDO_UNAVAILABLE', { cause: error })
+        }
+        if (error instanceof CardNotFoundError) {
+          throw new AppError('NOT_FOUND', { cause: error })
+        }
+        throw error
+      }
+
+      // 戻したカードがそのまま次の出題になる。画面は再取得せずに描き直せる。
+      return getSession(context, input.sessionId)
     },
   }
 }

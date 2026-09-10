@@ -10,6 +10,7 @@ import type { ScheduleRow, StudyRepository } from './study-repository'
 import {
   createStudyRepository,
   StudyStateConflictError,
+  UndoUnavailableError,
 } from './study-repository'
 
 const SCHEDULER_VERSION = 'ts-fsrs@5.4.1/fsrs-6'
@@ -693,6 +694,231 @@ describe('StudyRepository', () => {
       expect(event?.beforeSnapshot).toMatchObject({ state: 'new' })
       expect(event?.afterSnapshot).toMatchObject({ state: 'review' })
       expect(event?.reviewedAt?.getTime()).toBe(NOW.getTime())
+    })
+  })
+
+  describe('レビューの取り消し', () => {
+    /** 1枚を出題して評価まで進め、取り消しの前提を作る。 */
+    async function reviewOnce(): Promise<{
+      principalId: string
+      sessionId: string
+      cardId: string
+      before: ScheduleRow
+      after: ScheduleRow
+    }> {
+      const principalId = await insertGuestPrincipal()
+      await seedDeck(principalId, 1)
+      const sessionId = await startSession(principalId)
+      const card = await repository.nextCard({
+        principalId,
+        sessionId,
+        now: NOW,
+        learningDay: LEARNING_DAY,
+        initialSchedule: INITIAL_SEED,
+      })
+
+      if (card === null) {
+        throw new Error('出題できませんでした。')
+      }
+
+      const outcome = await repository.submitReview({
+        principalId,
+        sessionId,
+        cardId: card.cardId,
+        rating: 3,
+        expectedScheduleVersion: card.schedule.version,
+        idempotencyKey: randomUUID(),
+        now: NOW,
+        learningDay: LEARNING_DAY,
+        apply: (current) => applied(current, NOW),
+      })
+
+      return {
+        principalId,
+        sessionId,
+        cardId: card.cardId,
+        before: card.schedule,
+        after: outcome.schedule,
+      }
+    }
+
+    test('直前の評価を評価前の状態へ戻す', async () => {
+      const prepared = await reviewOnce()
+
+      const outcome = await repository.undoLastReview({
+        principalId: prepared.principalId,
+        sessionId: prepared.sessionId,
+        idempotencyKey: randomUUID(),
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      })
+
+      expect(outcome.applied).toBe(true)
+      expect(outcome.cardId).toBe(prepared.cardId)
+      expect(outcome.schedule.state).toBe(prepared.before.state)
+      expect(outcome.schedule.reps).toBe(prepared.before.reps)
+      expect(outcome.schedule.dueAt.getTime()).toBe(
+        prepared.before.dueAt.getTime(),
+      )
+    })
+
+    test('バージョンは巻き戻さず前へ進める', async () => {
+      // 巻き戻すと、古い版を握った並行要求が通ってしまう。
+      const prepared = await reviewOnce()
+
+      const outcome = await repository.undoLastReview({
+        principalId: prepared.principalId,
+        sessionId: prepared.sessionId,
+        idempotencyKey: randomUUID(),
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      })
+
+      expect(outcome.schedule.version).toBe(prepared.after.version + 1)
+    })
+
+    test('補正イベントを追記して評価は消さない', async () => {
+      const prepared = await reviewOnce()
+
+      await repository.undoLastReview({
+        principalId: prepared.principalId,
+        sessionId: prepared.sessionId,
+        idempotencyKey: randomUUID(),
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      })
+
+      const events = await handle.db
+        .select({ kind: schema.reviewEvents.kind })
+        .from(schema.reviewEvents)
+
+      expect(events.map((row) => row.kind).sort()).toEqual(['review', 'undo'])
+    })
+
+    test('同じ冪等キーの再送で二重に戻さない', async () => {
+      const prepared = await reviewOnce()
+      const idempotencyKey = randomUUID()
+      const input = {
+        principalId: prepared.principalId,
+        sessionId: prepared.sessionId,
+        idempotencyKey,
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      }
+
+      const first = await repository.undoLastReview(input)
+      const second = await repository.undoLastReview(input)
+
+      expect(first.applied).toBe(true)
+      expect(second.applied).toBe(false)
+      expect(second.schedule.version).toBe(first.schedule.version)
+
+      const events = await handle.db.select().from(schema.reviewEvents)
+      expect(events).toHaveLength(2)
+    })
+
+    test('戻せる評価が無ければ拒否する', async () => {
+      const principalId = await insertGuestPrincipal()
+      await seedDeck(principalId, 1)
+      const sessionId = await startSession(principalId)
+
+      await expect(
+        repository.undoLastReview({
+          principalId,
+          sessionId,
+          idempotencyKey: randomUUID(),
+          now: NOW,
+          learningDay: LEARNING_DAY,
+        }),
+      ).rejects.toBeInstanceOf(UndoUnavailableError)
+    })
+
+    test('二度続けて取り消せない', async () => {
+      // 戻せるのは直前の1手だけ。
+      const prepared = await reviewOnce()
+      await repository.undoLastReview({
+        principalId: prepared.principalId,
+        sessionId: prepared.sessionId,
+        idempotencyKey: randomUUID(),
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      })
+
+      await expect(
+        repository.undoLastReview({
+          principalId: prepared.principalId,
+          sessionId: prepared.sessionId,
+          idempotencyKey: randomUUID(),
+          now: NOW,
+          learningDay: LEARNING_DAY,
+        }),
+      ).rejects.toBeInstanceOf(UndoUnavailableError)
+    })
+
+    test('他人のセッションは戻せない', async () => {
+      const prepared = await reviewOnce()
+      const other = await insertGuestPrincipal()
+
+      await expect(
+        repository.undoLastReview({
+          principalId: other,
+          sessionId: prepared.sessionId,
+          idempotencyKey: randomUUID(),
+          now: NOW,
+          learningDay: LEARNING_DAY,
+        }),
+      ).rejects.toThrow()
+
+      const events = await handle.db.select().from(schema.reviewEvents)
+      expect(events).toHaveLength(1)
+    })
+
+    test('取り消すと当日の新規枠が戻る', async () => {
+      // 新規1枚のデッキで1枚出して評価し、取り消したら再び出る。
+      const principalId = await insertGuestPrincipal()
+      const { deckId } = await seedDeck(principalId, 2, 1)
+      const sessionId = await startSession(principalId, [deckId])
+      const card = await repository.nextCard({
+        principalId,
+        sessionId,
+        now: NOW,
+        learningDay: LEARNING_DAY,
+        initialSchedule: INITIAL_SEED,
+      })
+
+      if (card === null) {
+        throw new Error('出題できませんでした。')
+      }
+
+      await repository.submitReview({
+        principalId,
+        sessionId,
+        cardId: card.cardId,
+        rating: 3,
+        expectedScheduleVersion: card.schedule.version,
+        idempotencyKey: randomUUID(),
+        now: NOW,
+        learningDay: LEARNING_DAY,
+        apply: (current) => applied(current, NOW),
+      })
+
+      await repository.undoLastReview({
+        principalId,
+        sessionId,
+        idempotencyKey: randomUUID(),
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      })
+
+      const again = await repository.nextCard({
+        principalId,
+        sessionId,
+        now: NOW,
+        learningDay: LEARNING_DAY,
+        initialSchedule: INITIAL_SEED,
+      })
+
+      expect(again).not.toBeNull()
     })
   })
 })

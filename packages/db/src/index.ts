@@ -50,6 +50,9 @@ export {
   type StudyRepository,
   StudyStateConflictError,
   type SubmitReviewInput,
+  type UndoLastReviewInput,
+  type UndoOutcome,
+  UndoUnavailableError,
 } from './repositories/study-repository'
 export * as schema from './schema'
 export type { IdentityMergeStatus, PrincipalKind } from './schema/principals'

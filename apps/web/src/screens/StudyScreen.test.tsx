@@ -208,3 +208,97 @@ describe('StudyScreen', () => {
     ])
   })
 })
+
+describe('直前の評価の取り消し', () => {
+  const first = { id: CARD_1, front: '表1', back: '裏1' }
+  const second = { id: CARD_2, front: '表2', back: '裏2' }
+
+  /** 1枚目を評価して2枚目へ進んだ状態を作る。 */
+  async function reviewOnce(
+    undoResponse: () => Response = () => jsonResponse(studyView(first)),
+  ) {
+    const undoCalls: string[] = []
+
+    renderScreen(async (input, init) => {
+      const route = routeOf(input)
+      if (route === '/api/security/csrf') {
+        return jsonResponse({ csrfToken: 'test-token' })
+      }
+      if (route === '/api/study/reviews/undo' && init?.method === 'POST') {
+        undoCalls.push(typeof init.body === 'string' ? init.body : '')
+        return undoResponse()
+      }
+      if (route === '/api/study/reviews' && init?.method === 'POST') {
+        return jsonResponse({ schedule: { scheduleVersion: 2 } })
+      }
+      if (route === `/api/study/sessions/${SESSION_ID}`) {
+        return jsonResponse(studyView(second))
+      }
+      return jsonResponse(studyView(first), 201)
+    })
+
+    await screen.findByText('表1')
+    fireEvent.click(screen.getByRole('button', { name: '答えを見る' }))
+    fireEvent.click(screen.getByRole('button', { name: /普通/ }))
+    await screen.findByText('表2')
+
+    return { undoCalls }
+  }
+
+  test('評価する前は取り消しを出さない', async () => {
+    renderScreen(async (input) =>
+      routeOf(input) === '/api/security/csrf'
+        ? jsonResponse({ csrfToken: 'test-token' })
+        : jsonResponse(studyView(first), 201),
+    )
+
+    await screen.findByText('表1')
+    expect(screen.queryByRole('button', { name: '取り消す' })).toBeNull()
+  })
+
+  test('評価したあとに取り消しを出す', async () => {
+    await reviewOnce()
+
+    expect(screen.getByRole('button', { name: '取り消す' })).toBeTruthy()
+  })
+
+  test('取り消すと直前のカードへ戻る', async () => {
+    const { undoCalls } = await reviewOnce()
+
+    fireEvent.click(screen.getByRole('button', { name: '取り消す' }))
+
+    expect(await screen.findByText('表1')).toBeTruthy()
+    expect(undoCalls).toHaveLength(1)
+    expect(undoCalls[0]).toContain(SESSION_ID)
+  })
+
+  test('取り消したあとは続けて取り消せない', async () => {
+    // 戻せるのは直前の1手だけ。
+    await reviewOnce()
+
+    fireEvent.click(screen.getByRole('button', { name: '取り消す' }))
+    await screen.findByText('表1')
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: '取り消す' })).toBeNull()
+    })
+  })
+
+  test('取り消せない場合は日本語のメッセージを出す', async () => {
+    await reviewOnce(() =>
+      jsonResponse(
+        {
+          error: {
+            code: 'UNDO_UNAVAILABLE',
+            message: '取り消せる評価がありません。',
+          },
+        },
+        409,
+      ),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '取り消す' }))
+
+    expect(await screen.findByText(/取り消せる評価がありません/)).toBeTruthy()
+  })
+})

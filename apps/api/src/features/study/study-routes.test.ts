@@ -4,6 +4,7 @@ import {
   type ScheduleRow,
   type StudyRepository,
   StudyStateConflictError,
+  UndoUnavailableError,
 } from '@tango/db'
 import { AppError } from '@tango/shared'
 import { describe, expect, test } from 'vitest'
@@ -76,7 +77,7 @@ function createScheduler(): FsrsScheduler {
 }
 
 function createRepository(
-  options: { conflict?: boolean } = {},
+  options: { conflict?: boolean; undoUnavailable?: boolean } = {},
 ): StudyRepository {
   const recorded = new Map<string, ScheduleRow>()
 
@@ -115,6 +116,18 @@ function createRepository(
       }
       recorded.set(input.idempotencyKey, schedule)
       return { applied: true, schedule }
+    },
+    async undoLastReview(input) {
+      if (options.undoUnavailable === true) {
+        throw new UndoUnavailableError()
+      }
+      const replay = recorded.get(input.idempotencyKey)
+      if (replay !== undefined) {
+        return { applied: false, cardId: CARD_ID, schedule: replay }
+      }
+      const schedule = { ...SCHEDULE, version: SCHEDULE.version + 2 }
+      recorded.set(input.idempotencyKey, schedule)
+      return { applied: true, cardId: CARD_ID, schedule }
     },
   }
 }
@@ -275,5 +288,64 @@ describe('study routes', () => {
 
     expect(first.status).toBe(200)
     expect(await first.json()).toEqual(await second.json())
+  })
+})
+
+describe('POST /api/study/reviews/undo', () => {
+  function undo(
+    app: ReturnType<typeof createHarness>,
+    body: Record<string, unknown>,
+  ) {
+    return app.request('/api/study/reviews/undo', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    })
+  }
+
+  test('取り消したあとのセッション状態を返す', async () => {
+    const response = await undo(createHarness(), {
+      sessionId: SESSION_ID,
+      idempotencyKey: randomUUID(),
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ sessionId: SESSION_ID })
+  })
+
+  test('取り消せない場合は409とUNDO_UNAVAILABLEを返す', async () => {
+    const response = await undo(
+      createHarness(createRepository({ undoUnavailable: true })),
+      { sessionId: SESSION_ID, idempotencyKey: randomUUID() },
+    )
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({
+      error: { code: 'UNDO_UNAVAILABLE' },
+    })
+  })
+
+  test('カードIDを受け取らない', async () => {
+    // どの評価を戻すかはサーバが決める。
+    const response = await undo(createHarness(), {
+      sessionId: SESSION_ID,
+      idempotencyKey: randomUUID(),
+      cardId: CARD_ID,
+    })
+
+    expect(response.status).toBe(400)
+  })
+
+  test('actorが無ければ401を返す', async () => {
+    const response = await createHarness().request('/api/study/reviews/undo', {
+      method: 'POST',
+      headers: mutationHeaders([], { 'content-type': 'application/json' }),
+      body: JSON.stringify({
+        sessionId: SESSION_ID,
+        idempotencyKey: randomUUID(),
+      }),
+    })
+
+    expect(response.status).toBe(401)
   })
 })
