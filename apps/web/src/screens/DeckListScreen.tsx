@@ -190,9 +190,12 @@ export function DeckListScreen() {
           <p className="eyebrow">TANGO / PRE-RELEASE</p>
           <h1>単語帳</h1>
         </div>
-        <Link className="study-link" to="/study">
-          すべて学習
-        </Link>
+        <div className="header-links">
+          <Link to="/trash">ゴミ箱</Link>
+          <Link className="study-link" to="/study">
+            すべて学習
+          </Link>
+        </div>
       </header>
 
       {guest === null ? null : (
@@ -309,7 +312,7 @@ export function DeckListScreen() {
                 onClick={() => {
                   if (
                     window.confirm(
-                      `「${deck.name}」を削除します。元に戻せません。`,
+                      `「${deck.name}」を削除します。ゴミ箱から30日以内なら戻せます。`,
                     )
                   ) {
                     deleteDeck.mutate(deck.id)

@@ -69,6 +69,27 @@ export type StudySessionView = {
   remainingNew: number
 }
 
+export type TrashedDeckView = {
+  id: string
+  name: string
+  cardCount: number
+  trashedAt: string
+}
+
+export type TrashedCardView = {
+  id: string
+  deckId: string
+  deckName: string
+  front: string
+  trashedAt: string
+}
+
+export type TrashView = {
+  retentionDays: number
+  decks: readonly TrashedDeckView[]
+  cards: readonly TrashedCardView[]
+}
+
 export class ApiClientError extends Error {
   readonly code: string
 
@@ -165,6 +186,31 @@ function parseDeck(value: unknown): DeckSummary {
     description,
     newCardLimit: value.newCardLimit,
     cardCount: value.cardCount,
+  }
+}
+
+function parseTrashedDeck(value: unknown): TrashedDeckView {
+  if (!isRecord(value) || typeof value.cardCount !== 'number') {
+    throw new ApiClientError('INVALID_RESPONSE', 'ゴミ箱を読み込めません。')
+  }
+  return {
+    id: requiredString(value, 'id'),
+    name: requiredString(value, 'name'),
+    cardCount: value.cardCount,
+    trashedAt: requiredString(value, 'trashedAt'),
+  }
+}
+
+function parseTrashedCard(value: unknown): TrashedCardView {
+  if (!isRecord(value)) {
+    throw new ApiClientError('INVALID_RESPONSE', 'ゴミ箱を読み込めません。')
+  }
+  return {
+    id: requiredString(value, 'id'),
+    deckId: requiredString(value, 'deckId'),
+    deckName: requiredString(value, 'deckName'),
+    front: requiredString(value, 'front'),
+    trashedAt: requiredString(value, 'trashedAt'),
   }
 }
 
@@ -424,6 +470,29 @@ export const apiClient = {
   },
   async signOut(): Promise<void> {
     await request('/api/auth/sign-out', { method: 'POST', body: '{}' })
+  },
+  /** ゴミ箱の一覧。保持期限内のものだけが返る。 */
+  async listTrash(): Promise<TrashView> {
+    const body = await request('/api/trash')
+    if (
+      !isRecord(body) ||
+      typeof body.retentionDays !== 'number' ||
+      !Array.isArray(body.decks) ||
+      !Array.isArray(body.cards)
+    ) {
+      throw new ApiClientError('INVALID_RESPONSE', 'ゴミ箱を読み込めません。')
+    }
+    return {
+      retentionDays: body.retentionDays,
+      decks: body.decks.map(parseTrashedDeck),
+      cards: body.cards.map(parseTrashedCard),
+    }
+  },
+  async restoreDeck(deckId: string): Promise<void> {
+    await request(`/api/trash/decks/${deckId}/restore`, { method: 'POST' })
+  },
+  async restoreCard(cardId: string): Promise<void> {
+    await request(`/api/trash/cards/${cardId}/restore`, { method: 'POST' })
   },
   async listDecks(): Promise<readonly DeckSummary[]> {
     const body = await request('/api/decks')

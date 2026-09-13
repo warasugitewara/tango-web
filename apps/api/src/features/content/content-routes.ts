@@ -17,6 +17,10 @@ import {
 } from '../../middleware/request-context'
 import { parseImportPayload } from './import-parser'
 
+/** ゴミ箱の保持期限。上位仕様が定める30日。 */
+const TRASH_RETENTION_DAYS = 30
+const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000
+
 const idParamsSchema = z.object({ deckId: z.uuidv7() }).strict()
 const cardIdParamsSchema = z.object({ cardId: z.uuidv7() }).strict()
 const cardListQuerySchema = z
@@ -40,6 +44,11 @@ function validationFailure(result: ValidationResult) {
 
 function toDate(instant: Temporal.Instant): Date {
   return new Date(instant.epochMilliseconds)
+}
+
+/** 削除日時はJSTのオフセットを明示した形で返す。 */
+function toTrashedAt(trashedAt: Date): string {
+  return formatJst(Temporal.Instant.fromEpochMilliseconds(trashedAt.getTime()))
 }
 
 function toCardView(card: CardRecord) {
@@ -223,6 +232,61 @@ export function createContentRoutes(options: {
           toDate(serviceContext.now),
         )
         if (!deleted) {
+          throw new AppError('NOT_FOUND')
+        }
+        return context.body(null, 204)
+      },
+    )
+    .get('/trash', async (context) => {
+      const { actor, now } = requireServiceContext(context)
+      const cutoff = new Date(toDate(now).getTime() - TRASH_RETENTION_MS)
+      const [trashedDecks, trashedCards] = await Promise.all([
+        repository.listTrashedDecks(actor.principalId, cutoff),
+        repository.listTrashedCards(actor.principalId, cutoff),
+      ])
+
+      return context.json({
+        retentionDays: TRASH_RETENTION_DAYS,
+        decks: trashedDecks.map((deck) => ({
+          id: deck.id,
+          name: deck.name,
+          cardCount: deck.cardCount,
+          trashedAt: toTrashedAt(deck.trashedAt),
+        })),
+        cards: trashedCards.map((card) => ({
+          id: card.id,
+          deckId: card.deckId,
+          deckName: card.deckName,
+          front: card.front,
+          trashedAt: toTrashedAt(card.trashedAt),
+        })),
+      })
+    })
+    .post(
+      '/trash/decks/:deckId/restore',
+      zValidator('param', idParamsSchema, validationFailure),
+      async (context) => {
+        const { actor } = requireServiceContext(context)
+        const restored = await repository.restoreDeck(
+          actor.principalId,
+          context.req.valid('param').deckId,
+        )
+        if (!restored) {
+          throw new AppError('NOT_FOUND')
+        }
+        return context.body(null, 204)
+      },
+    )
+    .post(
+      '/trash/cards/:cardId/restore',
+      zValidator('param', cardIdParamsSchema, validationFailure),
+      async (context) => {
+        const { actor } = requireServiceContext(context)
+        const restored = await repository.restoreCard(
+          actor.principalId,
+          context.req.valid('param').cardId,
+        )
+        if (!restored) {
           throw new AppError('NOT_FOUND')
         }
         return context.body(null, 204)

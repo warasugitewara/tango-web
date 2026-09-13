@@ -82,3 +82,21 @@ describe('ボディ上限', () => {
     expect(body.error.message).toContain('大きすぎます')
   })
 })
+
+describe('本文を伴わない要求', () => {
+  test('本文の無いPOSTにContent-Typeを要求しない', async () => {
+    // 復元のような本文なしの操作に、意味のない空JSONを送らせない。
+    const response = await createApp().request('/api/decks', { method: 'POST' })
+
+    expect(response.status).toBe(200)
+  })
+
+  test('本文があってContent-Typeが無ければ拒否する', async () => {
+    const response = await createApp().request('/api/decks', {
+      method: 'POST',
+      body: '{"name":"英単語"}',
+    })
+
+    expect(response.status).toBe(400)
+  })
+})

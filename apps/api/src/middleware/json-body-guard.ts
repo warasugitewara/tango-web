@@ -56,6 +56,12 @@ export function jsonBodyGuard(): MiddlewareHandler<AppEnv> {
       return next()
     }
 
+    // 本文を伴わない操作にJSONのContent-Typeを要求しない。
+    // 復元のような操作へ、意味のない空JSONを送らせないため。
+    if (context.req.raw.body === null) {
+      return next()
+    }
+
     const contentType = context.req.header('Content-Type')
 
     if (

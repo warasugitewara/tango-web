@@ -216,4 +216,36 @@ describe('purgeExpiredGuests', () => {
 
     expect(summary.deletedRateLimitHits).toBe(0)
   })
+
+  test('保持期限を過ぎた削除済みも同じ実行で掃除する', async () => {
+    const purged: Date[] = []
+    const retentionMs = 30 * 24 * 60 * 60 * 1000
+
+    const summary = await purgeExpiredGuests({
+      repository: createRepository() as never,
+      clock: { now: () => NOW },
+      contentRepository: {
+        async purgeTrashed(before) {
+          purged.push(before)
+          return { deletedDecks: 2, deletedCards: 5 }
+        },
+      },
+      trashRetentionMs: retentionMs,
+    })
+
+    expect(summary.deletedTrashedDecks).toBe(2)
+    expect(summary.deletedTrashedCards).toBe(5)
+    expect(purged).toHaveLength(1)
+    expect(purged[0]?.getTime()).toBe(NOW.epochMilliseconds - retentionMs)
+  })
+
+  test('コンテンツのリポジトリが無ければゴミ箱を掃除しない', async () => {
+    const summary = await purgeExpiredGuests({
+      repository: createRepository() as never,
+      clock: { now: () => NOW },
+    })
+
+    expect(summary.deletedTrashedDecks).toBe(0)
+    expect(summary.deletedTrashedCards).toBe(0)
+  })
 })

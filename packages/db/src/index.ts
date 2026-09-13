@@ -18,6 +18,9 @@ export {
   type DeckSummary,
   hashCardContent,
   normalizeDeckName,
+  type PurgeTrashedResult,
+  type TrashedCard,
+  type TrashedDeck,
   type UpdateDeckInput,
 } from './repositories/content-repository'
 export {

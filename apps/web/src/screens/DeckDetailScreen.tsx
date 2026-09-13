@@ -352,7 +352,9 @@ export function DeckDetailScreen() {
                 type="button"
                 onClick={() => {
                   if (
-                    window.confirm('このカードを削除します。元に戻せません。')
+                    window.confirm(
+                      'このカードを削除します。ゴミ箱から30日以内なら戻せます。',
+                    )
                   ) {
                     remove.mutate(card.id)
                   }

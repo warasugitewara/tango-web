@@ -419,4 +419,233 @@ describe('ContentRepository', () => {
       expect(await repository.createCards(owner, deck.id, [], now)).toBe(0)
     })
   })
+
+  describe('ゴミ箱', () => {
+    /** 保持期限。これより古い削除済みは一覧に出さない。 */
+    const RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+    const cutoff = new Date(now.getTime() - RETENTION_MS)
+
+    test('削除したデッキを削除日つきで一覧に出す', async () => {
+      const owner = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      await repository.createCard(
+        owner,
+        deck.id,
+        { front: '表', back: '裏' },
+        now,
+      )
+      await repository.trashDeck(owner, deck.id, now)
+
+      const trashed = await repository.listTrashedDecks(owner, cutoff)
+
+      expect(trashed).toHaveLength(1)
+      expect(trashed[0]?.id).toBe(deck.id)
+      expect(trashed[0]?.name).toBe('英単語')
+      expect(trashed[0]?.trashedAt.getTime()).toBe(now.getTime())
+      expect(trashed[0]?.cardCount).toBe(1)
+    })
+
+    test('保持期限より古い削除済みデッキは出さない', async () => {
+      const owner = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      const old = new Date(now.getTime() - RETENTION_MS - 1000)
+      await repository.trashDeck(owner, deck.id, old)
+
+      expect(await repository.listTrashedDecks(owner, cutoff)).toHaveLength(0)
+    })
+
+    test('他人の削除済みデッキは見えない', async () => {
+      const owner = await insertGuestPrincipal()
+      const other = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      await repository.trashDeck(owner, deck.id, now)
+
+      expect(await repository.listTrashedDecks(other, cutoff)).toHaveLength(0)
+    })
+
+    test('デッキを復元すると通常の一覧へ戻る', async () => {
+      const owner = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      await repository.trashDeck(owner, deck.id, now)
+
+      expect(await repository.restoreDeck(owner, deck.id)).toBe(true)
+      expect(await repository.listDecks(owner)).toHaveLength(1)
+      expect(await repository.listTrashedDecks(owner, cutoff)).toHaveLength(0)
+    })
+
+    test('デッキを復元すると中のカードもそのまま戻る', async () => {
+      // デッキごと削除したカードは個別に削除されていない。
+      const owner = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      await repository.createCard(
+        owner,
+        deck.id,
+        { front: '表', back: '裏' },
+        now,
+      )
+      await repository.trashDeck(owner, deck.id, now)
+      await repository.restoreDeck(owner, deck.id)
+
+      expect(await repository.listCards(owner, deck.id, 10, 0)).toHaveLength(1)
+    })
+
+    test('他人のデッキは復元できない', async () => {
+      const owner = await insertGuestPrincipal()
+      const other = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      await repository.trashDeck(owner, deck.id, now)
+
+      expect(await repository.restoreDeck(other, deck.id)).toBe(false)
+      expect(await repository.listTrashedDecks(owner, cutoff)).toHaveLength(1)
+    })
+
+    test('削除したカードを所属デッキ名つきで一覧に出す', async () => {
+      const owner = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      const card = await repository.createCard(
+        owner,
+        deck.id,
+        { front: '表', back: '裏' },
+        now,
+      )
+
+      expect(card).not.toBeNull()
+      if (card === null) {
+        return
+      }
+      await repository.trashCard(owner, card.id, now)
+
+      const trashed = await repository.listTrashedCards(owner, cutoff)
+
+      expect(trashed).toHaveLength(1)
+      expect(trashed[0]?.id).toBe(card.id)
+      expect(trashed[0]?.deckName).toBe('英単語')
+      expect(trashed[0]?.front).toBe('表')
+    })
+
+    test('親デッキが削除済みのカードは一覧に出さない', async () => {
+      // 先にデッキを戻せば中身ごと戻る。二重に操作させない。
+      const owner = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      const card = await repository.createCard(
+        owner,
+        deck.id,
+        { front: '表', back: '裏' },
+        now,
+      )
+
+      expect(card).not.toBeNull()
+      if (card === null) {
+        return
+      }
+      await repository.trashCard(owner, card.id, now)
+      await repository.trashDeck(owner, deck.id, now)
+
+      expect(await repository.listTrashedCards(owner, cutoff)).toHaveLength(0)
+    })
+
+    test('カードを復元すると一覧へ戻る', async () => {
+      const owner = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      const card = await repository.createCard(
+        owner,
+        deck.id,
+        { front: '表', back: '裏' },
+        now,
+      )
+
+      expect(card).not.toBeNull()
+      if (card === null) {
+        return
+      }
+      await repository.trashCard(owner, card.id, now)
+
+      expect(await repository.restoreCard(owner, card.id)).toBe(true)
+      expect(await repository.listCards(owner, deck.id, 10, 0)).toHaveLength(1)
+    })
+
+    test('他人のカードは復元できない', async () => {
+      const owner = await insertGuestPrincipal()
+      const other = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      const card = await repository.createCard(
+        owner,
+        deck.id,
+        { front: '表', back: '裏' },
+        now,
+      )
+
+      expect(card).not.toBeNull()
+      if (card === null) {
+        return
+      }
+      await repository.trashCard(owner, card.id, now)
+
+      expect(await repository.restoreCard(other, card.id)).toBe(false)
+    })
+
+    test('保持期限を過ぎた削除済みデッキだけを物理削除する', async () => {
+      const owner = await insertGuestPrincipal()
+      const old = new Date(now.getTime() - RETENTION_MS - 1000)
+
+      const expired = await repository.createDeck(owner, { name: '古い' }, now)
+      await repository.createCard(
+        owner,
+        expired.id,
+        { front: 'a', back: 'b' },
+        now,
+      )
+      await repository.trashDeck(owner, expired.id, old)
+
+      const recent = await repository.createDeck(owner, { name: '最近' }, now)
+      await repository.trashDeck(owner, recent.id, now)
+
+      const alive = await repository.createDeck(owner, { name: '生存' }, now)
+
+      const result = await repository.purgeTrashed(cutoff)
+
+      expect(result.deletedDecks).toBe(1)
+
+      const remaining = await handle.db
+        .select({ id: schema.decks.id })
+        .from(schema.decks)
+      expect(remaining.map((row) => row.id).sort()).toEqual(
+        [recent.id, alive.id].sort(),
+      )
+      // デッキごと消えるのでカードもcascadeで消える。
+      expect(await handle.db.select().from(schema.cards)).toHaveLength(0)
+    })
+
+    test('保持期限を過ぎた削除済みカードだけを物理削除する', async () => {
+      const owner = await insertGuestPrincipal()
+      const deck = await repository.createDeck(owner, { name: '英単語' }, now)
+      const old = new Date(now.getTime() - RETENTION_MS - 1000)
+      const expired = await repository.createCard(
+        owner,
+        deck.id,
+        { front: '古い', back: 'b' },
+        now,
+      )
+      await repository.createCard(
+        owner,
+        deck.id,
+        { front: '生存', back: 'b' },
+        now,
+      )
+
+      expect(expired).not.toBeNull()
+      if (expired === null) {
+        return
+      }
+      await repository.trashCard(owner, expired.id, old)
+
+      const result = await repository.purgeTrashed(cutoff)
+
+      expect(result.deletedCards).toBe(1)
+      const remaining = await handle.db
+        .select({ front: schema.cards.front })
+        .from(schema.cards)
+      expect(remaining.map((row) => row.front)).toEqual(['生存'])
+    })
+  })
 })

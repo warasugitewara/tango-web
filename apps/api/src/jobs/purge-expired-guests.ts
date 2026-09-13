@@ -1,5 +1,10 @@
-import type { PrincipalRepository, RateLimitRepository } from '@tango/db'
+import type {
+  ContentRepository,
+  PrincipalRepository,
+  RateLimitRepository,
+} from '@tango/db'
 import {
+  createContentRepository,
   createDatabase,
   createPrincipalRepository,
   createRateLimitRepository,
@@ -25,6 +30,10 @@ export type PurgeSummary = {
   truncated: boolean
   /** 併せて掃除した濫用対策の記録件数。 */
   deletedRateLimitHits: number
+  /** 保持期限を過ぎて物理削除したデッキ件数。 */
+  deletedTrashedDecks: number
+  /** 保持期限を過ぎて物理削除したカード件数。 */
+  deletedTrashedCards: number
 }
 
 export type PurgeDependencies = {
@@ -37,10 +46,20 @@ export type PurgeDependencies = {
   rateLimitRepository?: RateLimitRepository
   /** この期間より古い濫用対策の記録を消す。 */
   rateLimitRetentionMs?: number
+  /**
+   * ゴミ箱の掃除先。専用のcronを増やさず、このジョブへ相乗りさせる。
+   * 掃除だけが必要なので、必要な操作に絞って受け取る。
+   */
+  contentRepository?: Pick<ContentRepository, 'purgeTrashed'>
+  /** この期間より古い削除済みを物理削除する。 */
+  trashRetentionMs?: number
 }
 
 /** 判定の窓を超えた記録は残す意味がない。既定はゲスト開始の窓と同じ。 */
 const DEFAULT_RATE_LIMIT_RETENTION_MS = 10 * 60 * 1000
+
+/** ゴミ箱の保持期限。上位仕様が定める30日。 */
+const DEFAULT_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
 /**
  * 期限切れゲストを有限ループで削除する。
@@ -62,6 +81,15 @@ export async function purgeExpiredGuests(
           new Date(now.getTime() - retentionMs),
         )
 
+  const trashRetentionMs =
+    dependencies.trashRetentionMs ?? DEFAULT_TRASH_RETENTION_MS
+  const trashed =
+    dependencies.contentRepository === undefined
+      ? { deletedDecks: 0, deletedCards: 0 }
+      : await dependencies.contentRepository.purgeTrashed(
+          new Date(now.getTime() - trashRetentionMs),
+        )
+
   for (let batch = 0; batch < MAX_BATCHES; batch += 1) {
     const result = await dependencies.repository.purgeExpiredGuests({
       now,
@@ -77,11 +105,20 @@ export async function purgeExpiredGuests(
         batches,
         truncated: false,
         deletedRateLimitHits,
+        deletedTrashedDecks: trashed.deletedDecks,
+        deletedTrashedCards: trashed.deletedCards,
       }
     }
   }
 
-  return { deletedPrincipals, batches, truncated: true, deletedRateLimitHits }
+  return {
+    deletedPrincipals,
+    batches,
+    truncated: true,
+    deletedRateLimitHits,
+    deletedTrashedDecks: trashed.deletedDecks,
+    deletedTrashedCards: trashed.deletedCards,
+  }
 }
 
 /** このCLIが受け付ける唯一のオプション。 */
@@ -157,6 +194,7 @@ async function main(): Promise<void> {
     const summary = await purgeExpiredGuests({
       repository: createPrincipalRepository(database.db),
       rateLimitRepository: createRateLimitRepository(database.db),
+      contentRepository: createContentRepository(database.db),
       clock,
     })
 

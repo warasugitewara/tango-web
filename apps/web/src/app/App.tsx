@@ -4,6 +4,7 @@ import { AuthCompleteScreen } from '../screens/AuthCompleteScreen'
 import { DeckDetailScreen } from '../screens/DeckDetailScreen'
 import { DeckListScreen } from '../screens/DeckListScreen'
 import { StudyScreen } from '../screens/StudyScreen'
+import { TrashScreen } from '../screens/TrashScreen'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 10_000 } },
@@ -18,6 +19,7 @@ export function App() {
           <Route path="/decks/:deckId" element={<DeckDetailScreen />} />
           <Route path="/study" element={<StudyScreen />} />
           <Route path="/auth/complete" element={<AuthCompleteScreen />} />
+          <Route path="/trash" element={<TrashScreen />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

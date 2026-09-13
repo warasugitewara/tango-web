@@ -104,7 +104,10 @@ https://tango.warasugi.com/api/auth/callback/github
 
 ## メンテナンスジョブ
 
-期限切れのゲスト principal を削除する。
+期限切れのゲスト principal を削除する。あわせて次も同じ実行で掃除する。専用の cron を増やさないための相乗りであり、ジョブ名が示す範囲より責務が広い。
+
+- 濫用対策の試行記録（判定の窓を過ぎたもの）
+- ゴミ箱の保持期限（30 日）を過ぎた削除済みデッキとカードの物理削除
 
 ```powershell
 bun apps/api/src/jobs/purge-expired-guests.ts

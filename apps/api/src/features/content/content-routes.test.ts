@@ -16,6 +16,21 @@ function createRepository(): ContentRepository {
     async ensureDemoDeck() {
       // 各テストで必要な場合だけ上書きする。
     },
+    async listTrashedDecks() {
+      return []
+    },
+    async listTrashedCards() {
+      return []
+    },
+    async restoreDeck() {
+      return false
+    },
+    async restoreCard() {
+      return false
+    },
+    async purgeTrashed() {
+      return { deletedDecks: 0, deletedCards: 0 }
+    },
     async listDecks() {
       return []
     },
@@ -322,5 +337,140 @@ describe('content routes', () => {
 
     expect(response.status).toBe(400)
     expect(createCalls).toBe(0)
+  })
+})
+
+describe('ゴミ箱', () => {
+  const DECK_ID = '019fd000-0000-7000-8000-0000000000d1'
+  const CARD_ID = '019fd000-0000-7000-8000-0000000000c1'
+  const TRASHED_AT = new Date('2026-08-20T03:00:00Z')
+
+  function createTrashRepository(
+    options: { restored?: boolean } = {},
+  ): ContentRepository {
+    const restored = options.restored ?? true
+    return {
+      ...createRepository(),
+      async listTrashedDecks() {
+        return [
+          { id: DECK_ID, name: '英単語', trashedAt: TRASHED_AT, cardCount: 3 },
+        ]
+      },
+      async listTrashedCards() {
+        return [
+          {
+            id: CARD_ID,
+            deckId: DECK_ID,
+            deckName: '英単語',
+            front: '表',
+            trashedAt: TRASHED_AT,
+          },
+        ]
+      },
+      async restoreDeck() {
+        return restored
+      },
+      async restoreCard() {
+        return restored
+      },
+      async purgeTrashed() {
+        return { deletedDecks: 0, deletedCards: 0 }
+      },
+    }
+  }
+
+  test('actorが無ければ401を返す', async () => {
+    const response = await createHarness(createTrashRepository()).request(
+      '/api/trash',
+    )
+
+    expect(response.status).toBe(401)
+  })
+
+  test('削除済みのデッキとカードを日時つきで返す', async () => {
+    const response = await createHarness(createTrashRepository()).request(
+      '/api/trash',
+      { headers: guestHeaders() },
+    )
+
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body).toMatchObject({
+      decks: [{ id: DECK_ID, name: '英単語', cardCount: 3 }],
+      cards: [{ id: CARD_ID, deckName: '英単語', front: '表' }],
+    })
+  })
+
+  test('削除日時はJSTのオフセットを明示して返す', async () => {
+    const response = await createHarness(createTrashRepository()).request(
+      '/api/trash',
+      { headers: guestHeaders() },
+    )
+    const body = await response.json()
+
+    expect(body).toMatchObject({
+      decks: [{ trashedAt: expect.stringMatching(/\+09:00$/) }],
+      cards: [{ trashedAt: expect.stringMatching(/\+09:00$/) }],
+    })
+  })
+
+  test('保持期限の残り日数を返す', async () => {
+    // 画面が「あと何日で完全に削除されるか」を出せるようにする。
+    const response = await createHarness(createTrashRepository()).request(
+      '/api/trash',
+      { headers: guestHeaders() },
+    )
+    const body = await response.json()
+
+    expect(body).toMatchObject({ retentionDays: 30 })
+  })
+
+  test('デッキを復元できる', async () => {
+    const response = await createHarness(createTrashRepository()).request(
+      `/api/trash/decks/${DECK_ID}/restore`,
+      { method: 'POST', headers: guestHeaders() },
+    )
+
+    expect(response.status).toBe(204)
+  })
+
+  test('復元できないデッキは404を返す', async () => {
+    const response = await createHarness(
+      createTrashRepository({ restored: false }),
+    ).request(`/api/trash/decks/${DECK_ID}/restore`, {
+      method: 'POST',
+      headers: guestHeaders(),
+    })
+
+    expect(response.status).toBe(404)
+  })
+
+  test('カードを復元できる', async () => {
+    const response = await createHarness(createTrashRepository()).request(
+      `/api/trash/cards/${CARD_ID}/restore`,
+      { method: 'POST', headers: guestHeaders() },
+    )
+
+    expect(response.status).toBe(204)
+  })
+
+  test('復元できないカードは404を返す', async () => {
+    const response = await createHarness(
+      createTrashRepository({ restored: false }),
+    ).request(`/api/trash/cards/${CARD_ID}/restore`, {
+      method: 'POST',
+      headers: guestHeaders(),
+    })
+
+    expect(response.status).toBe(404)
+  })
+
+  test('UUIDv7でないIDを拒否する', async () => {
+    const response = await createHarness(createTrashRepository()).request(
+      '/api/trash/decks/not-a-uuid/restore',
+      { method: 'POST', headers: guestHeaders() },
+    )
+
+    expect(response.status).toBe(400)
   })
 })

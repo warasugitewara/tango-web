@@ -186,7 +186,7 @@ describe('DeckDetailScreen', () => {
     expect(screen.getAllByText('裏1').length).toBeGreaterThan(0)
   })
 
-  test('削除は戻せない旨を確認してから実行する', async () => {
+  test('削除はゴミ箱へ入る旨を確認してから実行する', async () => {
     renderScreen()
     fireEvent.change(await screen.findByLabelText('表'), {
       target: { value: '表1' },
@@ -205,7 +205,7 @@ describe('DeckDetailScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: '削除' }))
 
     expect(messages).toHaveLength(1)
-    expect(messages[0]).toContain('戻せません')
+    expect(messages[0]).toContain('ゴミ箱')
   })
 })
 
