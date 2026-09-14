@@ -18,6 +18,9 @@ import {
 import { parseImportPayload } from './import-parser'
 
 /** ゴミ箱の保持期限。上位仕様が定める30日。 */
+/** 書き出しの上限。取り込みの上限と揃え、戻せない大きさにしない。 */
+const MAX_EXPORT_CARDS = 10_000
+
 const TRASH_RETENTION_DAYS = 30
 const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000
 
@@ -182,6 +185,39 @@ export function createContentRoutes(options: {
           throw new AppError('NOT_FOUND')
         }
         return context.json({ card: toCardView(card) }, 201)
+      },
+    )
+    .get(
+      '/decks/:deckId/export',
+      zValidator('param', idParamsSchema, validationFailure),
+      async (context) => {
+        const { actor } = requireServiceContext(context)
+        const deckId = context.req.valid('param').deckId
+        const decks = await repository.listDecks(actor.principalId)
+        if (!decks.some((deck) => deck.id === deckId)) {
+          throw new AppError('NOT_FOUND')
+        }
+
+        const total = await repository.countCards(actor.principalId, deckId)
+        if (total > MAX_EXPORT_CARDS) {
+          throw new AppError('VALIDATION_FAILED', {
+            publicMessage:
+              'カードが多すぎて書き出せません。デッキを分けてください。',
+          })
+        }
+
+        const cards = await repository.listCards(
+          actor.principalId,
+          deckId,
+          MAX_EXPORT_CARDS,
+          0,
+        )
+        // 取り込みと同じ封筒で返す。書き出したものをそのまま戻せる。
+        return context.json({
+          schema: 'tango.content',
+          version: 1,
+          cards: cards.map((card) => ({ front: card.front, back: card.back })),
+        })
       },
     )
     .post(

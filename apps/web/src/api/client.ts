@@ -70,6 +70,13 @@ export type StudyDashboard = {
   nextDueAt: string | null
 }
 
+/** 書き出したデッキの中身。取り込みと同じ封筒。 */
+export type DeckExport = {
+  schema: 'tango.content'
+  version: 1
+  cards: readonly { front: string; back: string }[]
+}
+
 /** カード一覧の1ページ。`total` はゴミ箱を除いたデッキ内の総数。 */
 export type CardPage = {
   cards: readonly CardRecord[]
@@ -280,6 +287,37 @@ function parseDashboard(value: unknown): StudyDashboard {
     },
     activity: value.activity.map(parseActivityDay),
     nextDueAt,
+  }
+}
+
+function parseDeckExport(value: unknown): DeckExport {
+  if (
+    !isRecord(value) ||
+    value.schema !== 'tango.content' ||
+    value.version !== 1 ||
+    !Array.isArray(value.cards)
+  ) {
+    throw new ApiClientError(
+      'INVALID_RESPONSE',
+      '書き出しデータを読み込めません。',
+    )
+  }
+
+  return {
+    schema: 'tango.content',
+    version: 1,
+    cards: value.cards.map((card) => {
+      if (!isRecord(card)) {
+        throw new ApiClientError(
+          'INVALID_RESPONSE',
+          '書き出しデータを読み込めません。',
+        )
+      }
+      return {
+        front: requiredString(card, 'front'),
+        back: requiredString(card, 'back'),
+      }
+    }),
   }
 }
 
@@ -569,6 +607,10 @@ export const apiClient = {
   /** デッキ一覧の先頭に出す進捗の集計。 */
   async dashboard(): Promise<StudyDashboard> {
     return parseDashboard(await request('/api/study/dashboard'))
+  },
+  /** デッキの中身を取り込みと同じ封筒で書き出す。 */
+  async exportDeck(deckId: string): Promise<DeckExport> {
+    return parseDeckExport(await request(`/api/decks/${deckId}/export`))
   },
   async createDeck(input: DeckCreateInput): Promise<DeckSummary> {
     const body = await request('/api/decks', {

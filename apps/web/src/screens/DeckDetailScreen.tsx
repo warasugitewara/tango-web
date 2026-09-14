@@ -23,6 +23,19 @@ function parseNewCardLimit(value: string): number | null {
  * 変更はPATCHで送るが、部分更新の差分計算は持たず3項目を常に送る。
  * 画面が持つ値がそのまま保存される形にして、押した結果を読み違えないようにする。
  */
+/** 書き出した内容をファイルとして渡す。 */
+function downloadJson(filename: string, content: unknown): void {
+  const blob = new Blob([JSON.stringify(content, null, 2)], {
+    type: 'application/json',
+  })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 function DeckSettingsForm(props: { deck: DeckSummary }) {
   const { deck } = props
   const queryClient = useQueryClient()
@@ -167,6 +180,7 @@ export function DeckDetailScreen() {
   const [format, setFormat] = useState<'json' | 'csv'>('json')
   const [payload, setPayload] = useState('')
   const [importedCount, setImportedCount] = useState<number | null>(null)
+  const [exported, setExported] = useState(false)
   const [offset, setOffset] = useState(0)
 
   const cards = useQuery({
@@ -209,6 +223,16 @@ export function DeckDetailScreen() {
       await queryClient.invalidateQueries({
         queryKey: ['cards', resolvedDeckId],
       })
+    },
+  })
+  const exportDeck = useMutation({
+    mutationFn: () => apiClient.exportDeck(resolvedDeckId),
+    onSuccess: (content) => {
+      downloadJson(
+        `${deck === undefined ? 'deck' : deck.name}.tango.json`,
+        content,
+      )
+      setExported(true)
     },
   })
   const importCards = useMutation({
@@ -277,6 +301,22 @@ export function DeckDetailScreen() {
         {create.isError ? (
           <p className="form-error">{create.error.message}</p>
         ) : null}
+      </section>
+
+      <section className="content-panel">
+        <h2>書き出す</h2>
+        <p>取り込みと同じJSON形式で保存する。そのまま取り込み直せる。</p>
+        <button
+          type="button"
+          disabled={exportDeck.isPending}
+          onClick={() => exportDeck.mutate()}
+        >
+          書き出す
+        </button>
+        {exportDeck.isError ? (
+          <p className="form-error">{exportDeck.error.message}</p>
+        ) : null}
+        {exported ? <p>書き出しました。</p> : null}
       </section>
 
       <section className="content-panel">

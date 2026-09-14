@@ -474,3 +474,107 @@ describe('ゴミ箱', () => {
     expect(response.status).toBe(400)
   })
 })
+
+describe('書き出し', () => {
+  const EXPORT_DECK_ID = '019fd000-0000-7000-8000-0000000000e1'
+
+  function createExportRepository(
+    options: { cardCount?: number } = {},
+  ): ContentRepository {
+    const cardCount = options.cardCount ?? 2
+    return {
+      ...createRepository(),
+      async listDecks() {
+        return [
+          {
+            id: EXPORT_DECK_ID,
+            name: '英単語',
+            description: null,
+            newCardLimit: 20,
+            cardCount,
+          },
+        ]
+      },
+      async countCards() {
+        return cardCount
+      },
+      async listCards() {
+        return [
+          {
+            id: '019fd000-0000-7000-8000-0000000000c1',
+            deckId: EXPORT_DECK_ID,
+            front: '表1',
+            back: '裏1',
+            contentHash: 'a'.repeat(64),
+            createdAt: new Date('2026-08-21T03:00:00Z'),
+            updatedAt: new Date('2026-08-21T03:00:00Z'),
+          },
+          {
+            id: '019fd000-0000-7000-8000-0000000000c2',
+            deckId: EXPORT_DECK_ID,
+            front: '表2',
+            back: '裏2',
+            contentHash: 'b'.repeat(64),
+            createdAt: new Date('2026-08-21T03:00:00Z'),
+            updatedAt: new Date('2026-08-21T03:00:00Z'),
+          },
+        ]
+      },
+    }
+  }
+
+  test('actorが無ければ401を返す', async () => {
+    const response = await createHarness(createExportRepository()).request(
+      `/api/decks/${EXPORT_DECK_ID}/export`,
+    )
+
+    expect(response.status).toBe(401)
+  })
+
+  test('取り込みと同じ封筒で書き出す', async () => {
+    // 書き出したものをそのまま取り込み直せることが要件。
+    const response = await createHarness(createExportRepository()).request(
+      `/api/decks/${EXPORT_DECK_ID}/export`,
+      { headers: guestHeaders() },
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      schema: 'tango.content',
+      version: 1,
+      cards: [
+        { front: '表1', back: '裏1' },
+        { front: '表2', back: '裏2' },
+      ],
+    })
+  })
+
+  test('自分のものでないデッキは404を返す', async () => {
+    const response = await createHarness(createExportRepository()).request(
+      '/api/decks/019fd000-0000-7000-8000-0000000000ff/export',
+      { headers: guestHeaders() },
+    )
+
+    expect(response.status).toBe(404)
+  })
+
+  test('取り込みの上限を超える枚数は拒否する', async () => {
+    // 取り込み直せない大きさで書き出しても意味がない。
+    const response = await createHarness(
+      createExportRepository({ cardCount: 10_001 }),
+    ).request(`/api/decks/${EXPORT_DECK_ID}/export`, {
+      headers: guestHeaders(),
+    })
+
+    expect(response.status).toBe(400)
+  })
+
+  test('UUIDv7でないIDを拒否する', async () => {
+    const response = await createHarness(createExportRepository()).request(
+      '/api/decks/not-a-uuid/export',
+      { headers: guestHeaders() },
+    )
+
+    expect(response.status).toBe(400)
+  })
+})

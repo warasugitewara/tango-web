@@ -70,6 +70,7 @@ function renderScreen(
     options.cardCount ?? 0,
   )
   const deckPatches: Array<Record<string, unknown>> = []
+  const requestedPaths: string[] = []
   const cardListQueries: Array<{
     limit: string | null
     offset: string | null
@@ -85,6 +86,14 @@ function renderScreen(
       'https://tango.test',
     )
     const path = url.pathname
+    requestedPaths.push(path)
+    if (path === `/api/decks/${DECK_ID}/export`) {
+      return Response.json({
+        schema: 'tango.content',
+        version: 1,
+        cards: cards.map((card) => ({ front: card.front, back: card.back })),
+      })
+    }
     // CSRFトークンの発行はクライアントが自動で行う。
     if (path === '/api/security/csrf') {
       return new Response(JSON.stringify({ csrfToken: 'test-token' }), {
@@ -155,7 +164,7 @@ function renderScreen(
     </MemoryRouter>,
   )
 
-  return { deckPatches, cardListQueries }
+  return { deckPatches, cardListQueries, requestedPaths }
 }
 
 describe('DeckDetailScreen', () => {
@@ -316,5 +325,26 @@ describe('カード一覧のページ送り', () => {
     expect(await screen.findByText('60枚中 51〜60枚を表示')).toBeTruthy()
     const next = screen.getByRole('button', { name: '次の50件' })
     expect(next.hasAttribute('disabled')).toBe(true)
+  })
+
+  describe('書き出し', () => {
+    test('書き出すとデッキ名のファイルを渡す', async () => {
+      const created: Blob[] = []
+      const createObjectURL = vi.fn((blob: Blob) => {
+        created.push(blob)
+        return 'blob:test'
+      })
+      Object.assign(URL, {
+        createObjectURL,
+        revokeObjectURL: vi.fn(),
+      })
+
+      const { requestedPaths } = renderScreen()
+      fireEvent.click(await screen.findByRole('button', { name: '書き出す' }))
+
+      await screen.findByText(/書き出しました/)
+      expect(requestedPaths).toContain(`/api/decks/${DECK_ID}/export`)
+      expect(created).toHaveLength(1)
+    })
   })
 })
