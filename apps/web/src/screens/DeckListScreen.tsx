@@ -19,6 +19,30 @@ function linkedLabels(providers: readonly string[]): string {
     .join('、')
 }
 
+function totalRemaining(remaining: {
+  review: number
+  learning: number
+  new: number
+}): number {
+  return remaining.review + remaining.learning + remaining.new
+}
+
+/** 活動量の濃さ。枚数そのものは読み上げ用のラベルで伝える。 */
+function activityLevel(reviews: number): number {
+  if (reviews === 0) {
+    return 0
+  }
+  if (reviews < 5) {
+    return 1
+  }
+  return reviews < 10 ? 2 : 3
+}
+
+/** `2026-08-22T12:00:00+09:00` を `2026-08-22 12:00` にする。 */
+function toDueLabel(nextDueAt: string): string {
+  return nextDueAt.slice(0, 16).replace('T', ' ')
+}
+
 export function DeckListScreen() {
   const queryClient = useQueryClient()
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
@@ -38,6 +62,12 @@ export function DeckListScreen() {
   const deckQueues = useQuery({
     queryKey: ['deck-queues'],
     queryFn: () => apiClient.listDeckQueues(),
+    enabled: session.data?.authenticated === true,
+  })
+  // 進捗は学習のたびに変わるため、デッキ一覧とは別に取る。
+  const progress = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: () => apiClient.dashboard(),
     enabled: session.data?.authenticated === true,
   })
   const startGuest = useMutation({
@@ -197,6 +227,31 @@ export function DeckListScreen() {
           </Link>
         </div>
       </header>
+
+      {progress.data === undefined ? null : (
+        <section className="progress-panel" aria-label="学習の進み具合">
+          <p className="progress-figures">
+            <span>今日 {progress.data.completedToday}枚</span>
+            <span>連続 {progress.data.streakDays}日</span>
+            <span>残り {totalRemaining(progress.data.remaining)}枚</span>
+          </p>
+          <ul className="activity-row">
+            {progress.data.activity.map((day) => (
+              <li
+                key={day.learningDay}
+                className="activity-cell"
+                aria-label={`${day.learningDay} ${day.reviews}枚`}
+                data-level={activityLevel(day.reviews)}
+              />
+            ))}
+          </ul>
+          <p className="activity-note">
+            {progress.data.nextDueAt === null
+              ? '次の予定はありません。'
+              : `次回 ${toDueLabel(progress.data.nextDueAt)}`}
+          </p>
+        </section>
+      )}
 
       {guest === null ? null : (
         <aside className="guest-warning">

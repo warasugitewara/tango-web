@@ -921,4 +921,168 @@ describe('StudyRepository', () => {
       expect(again).not.toBeNull()
     })
   })
+
+  describe('進捗の集計', () => {
+    /** 活動量に並べる学習日数。 */
+    const DAYS = 7
+    const YESTERDAY = '2026-08-20'
+    const YESTERDAY_NOW = new Date(NOW.getTime() - 24 * 60 * 60 * 1000)
+
+    /** キューの先頭を1枚評価する。評価そのものの挙動は別の節で見ている。 */
+    async function reviewOne(
+      principalId: string,
+      sessionId: string,
+      learningDay: string,
+      now: Date,
+    ): Promise<string | null> {
+      const card = await repository.nextCard({
+        principalId,
+        sessionId,
+        now,
+        learningDay,
+        initialSchedule: INITIAL_SEED,
+      })
+      if (card === null) {
+        return null
+      }
+
+      await repository.submitReview({
+        principalId,
+        sessionId,
+        cardId: card.cardId,
+        rating: 3,
+        expectedScheduleVersion: card.schedule.version,
+        idempotencyKey: randomUUID(),
+        now,
+        learningDay,
+        apply: (current) => applied(current, now),
+      })
+
+      return card.cardId
+    }
+
+    function summarize(principalId: string) {
+      return repository.summarizeProgress({
+        principalId,
+        learningDay: LEARNING_DAY,
+        days: DAYS,
+        now: NOW,
+      })
+    }
+
+    test('履歴が無ければすべて0で次回期限も無い', async () => {
+      const owner = await insertGuestPrincipal()
+
+      const summary = await summarize(owner)
+
+      expect(summary.completedToday).toBe(0)
+      expect(summary.streakDays).toBe(0)
+      expect(summary.nextDueAt).toBeNull()
+      expect(summary.activity).toHaveLength(DAYS)
+      expect(summary.activity.every((day) => day.reviews === 0)).toBe(true)
+    })
+
+    test('当日に評価した枚数を数える', async () => {
+      const owner = await insertGuestPrincipal()
+      await seedDeck(owner, 2)
+      const sessionId = await startSession(owner)
+      await reviewOne(owner, sessionId, LEARNING_DAY, NOW)
+      await reviewOne(owner, sessionId, LEARNING_DAY, NOW)
+
+      expect((await summarize(owner)).completedToday).toBe(2)
+    })
+
+    test('取り消した評価は当日の枚数から引く', async () => {
+      // 追記専用の履歴から差し引きで出す。取り消しても行は消さない。
+      const owner = await insertGuestPrincipal()
+      await seedDeck(owner, 2)
+      const sessionId = await startSession(owner)
+      await reviewOne(owner, sessionId, LEARNING_DAY, NOW)
+      await reviewOne(owner, sessionId, LEARNING_DAY, NOW)
+      await repository.undoLastReview({
+        principalId: owner,
+        sessionId,
+        idempotencyKey: randomUUID(),
+        now: NOW,
+        learningDay: LEARNING_DAY,
+      })
+
+      expect((await summarize(owner)).completedToday).toBe(1)
+    })
+
+    test('活動量は指定日数ぶんを古い順に並べ、評価の無い日は0にする', async () => {
+      const owner = await insertGuestPrincipal()
+      await seedDeck(owner, 1)
+      const sessionId = await startSession(owner)
+      await reviewOne(owner, sessionId, LEARNING_DAY, NOW)
+
+      const activity = (await summarize(owner)).activity
+
+      expect(activity).toHaveLength(DAYS)
+      expect(activity[0]?.learningDay).toBe('2026-08-15')
+      expect(activity[DAYS - 1]?.learningDay).toBe(LEARNING_DAY)
+      expect(activity[DAYS - 1]?.reviews).toBe(1)
+      expect(activity[DAYS - 2]?.reviews).toBe(0)
+    })
+
+    test('連続した学習日を数える', async () => {
+      const owner = await insertGuestPrincipal()
+      await seedDeck(owner, 2)
+      const yesterdaySession = await repository.createSession({
+        principalId: owner,
+        deckIds: null,
+        learningDay: YESTERDAY,
+        now: YESTERDAY_NOW,
+      })
+      await reviewOne(owner, yesterdaySession, YESTERDAY, YESTERDAY_NOW)
+      const sessionId = await startSession(owner)
+      await reviewOne(owner, sessionId, LEARNING_DAY, NOW)
+
+      expect((await summarize(owner)).streakDays).toBe(2)
+    })
+
+    test('当日が未着手でも前日までの連続は途切れない', async () => {
+      // 朝いちで0日と出すと、続いている実感を壊す。
+      const owner = await insertGuestPrincipal()
+      await seedDeck(owner, 1)
+      const yesterdaySession = await repository.createSession({
+        principalId: owner,
+        deckIds: null,
+        learningDay: YESTERDAY,
+        now: YESTERDAY_NOW,
+      })
+      await reviewOne(owner, yesterdaySession, YESTERDAY, YESTERDAY_NOW)
+
+      const summary = await summarize(owner)
+
+      expect(summary.completedToday).toBe(0)
+      expect(summary.streakDays).toBe(1)
+    })
+
+    test('次回期限は未来のスケジュールのうち最も早いものを返す', async () => {
+      const owner = await insertGuestPrincipal()
+      await seedDeck(owner, 1)
+      const sessionId = await startSession(owner)
+      await reviewOne(owner, sessionId, LEARNING_DAY, NOW)
+
+      const summary = await summarize(owner)
+
+      expect(summary.nextDueAt?.getTime()).toBe(
+        NOW.getTime() + 24 * 60 * 60 * 1000,
+      )
+    })
+
+    test('他人の履歴は混ざらない', async () => {
+      const owner = await insertGuestPrincipal()
+      const other = await insertGuestPrincipal()
+      await seedDeck(other, 1)
+      const otherSession = await startSession(other)
+      await reviewOne(other, otherSession, LEARNING_DAY, NOW)
+
+      const summary = await summarize(owner)
+
+      expect(summary.completedToday).toBe(0)
+      expect(summary.nextDueAt).toBeNull()
+    })
+  })
 })

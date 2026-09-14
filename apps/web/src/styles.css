@@ -139,6 +139,51 @@ button:disabled {
   gap: 16px;
 }
 
+.progress-panel {
+  margin: 24px 0;
+  padding: 16px 18px;
+  background: #f9fbfa;
+  border: 1px solid #c8d6d3;
+}
+
+.progress-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  font-size: 1.05rem;
+}
+
+.activity-row {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-cell {
+  width: 26px;
+  height: 26px;
+  background: #e3eae8;
+  border: 1px solid #c8d6d3;
+}
+
+.activity-cell[data-level="1"] {
+  background: #bcd3cd;
+}
+
+.activity-cell[data-level="2"] {
+  background: #7aa79c;
+}
+
+.activity-cell[data-level="3"] {
+  background: #315c75;
+}
+
+.activity-note {
+  color: #607278;
+}
+
 .guest-warning {
   margin: 24px 0;
   padding: 14px 18px;

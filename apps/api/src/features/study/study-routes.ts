@@ -37,6 +37,12 @@ export function createStudyRoutes(options: { service: StudyService }) {
       )
       return context.json(result)
     })
+    .get('/study/dashboard', async (context) => {
+      const result = await service.summarizeProgress(
+        requireServiceContext(context),
+      )
+      return context.json(result)
+    })
     .post(
       '/study/sessions',
       zValidator('json', studySessionCreateSchema, validationFailure),

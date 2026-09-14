@@ -100,6 +100,14 @@ function createRepository(
     async countDeckQueues() {
       return [{ deckId: DECK_ID, review: 4, learning: 1, new: 2 }]
     },
+    async summarizeProgress() {
+      return {
+        completedToday: 0,
+        activity: [],
+        streakDays: 0,
+        nextDueAt: null,
+      }
+    },
     async submitReview(input) {
       if (options.conflict === true) {
         throw new StudyStateConflictError()
@@ -347,5 +355,94 @@ describe('POST /api/study/reviews/undo', () => {
     })
 
     expect(response.status).toBe(401)
+  })
+
+  describe('進捗ダッシュボード', () => {
+    const ACTIVITY = [
+      { learningDay: '2026-08-15', reviews: 0 },
+      { learningDay: '2026-08-16', reviews: 4 },
+      { learningDay: '2026-08-17', reviews: 0 },
+      { learningDay: '2026-08-18', reviews: 2 },
+      { learningDay: '2026-08-19', reviews: 6 },
+      { learningDay: '2026-08-20', reviews: 3 },
+      { learningDay: '2026-08-21', reviews: 5 },
+    ]
+
+    function createProgressRepository(
+      options: { nextDueAt?: Date | null } = {},
+    ): StudyRepository {
+      const nextDueAt =
+        options.nextDueAt === undefined
+          ? new Date('2026-08-22T03:00:00Z')
+          : options.nextDueAt
+
+      return {
+        ...createRepository(),
+        async summarizeProgress() {
+          return {
+            completedToday: 5,
+            activity: ACTIVITY,
+            streakDays: 3,
+            nextDueAt,
+          }
+        },
+      }
+    }
+
+    test('actorが無ければ401を返す', async () => {
+      const response = await createHarness(createProgressRepository()).request(
+        '/api/study/dashboard',
+      )
+
+      expect(response.status).toBe(401)
+    })
+
+    test('当日の完了枚数と連続学習日を返す', async () => {
+      const response = await createHarness(createProgressRepository()).request(
+        '/api/study/dashboard',
+        { headers: { cookie: `${GUEST_COOKIE_NAME}=${RAW_TOKEN}` } },
+      )
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        learningDay: '2026-08-21',
+        completedToday: 5,
+        streakDays: 3,
+        activity: ACTIVITY,
+      })
+    })
+
+    test('残りはデッキごとの合計で返す', async () => {
+      // 画面は合計しか出さないので、足し合わせはサーバで済ませる。
+      const response = await createHarness(createProgressRepository()).request(
+        '/api/study/dashboard',
+        { headers: { cookie: `${GUEST_COOKIE_NAME}=${RAW_TOKEN}` } },
+      )
+
+      expect(await response.json()).toMatchObject({
+        remaining: { review: 4, learning: 1, new: 2 },
+      })
+    })
+
+    test('次回期限はJSTのオフセットを明示して返す', async () => {
+      const response = await createHarness(createProgressRepository()).request(
+        '/api/study/dashboard',
+        { headers: { cookie: `${GUEST_COOKIE_NAME}=${RAW_TOKEN}` } },
+      )
+
+      expect(await response.json()).toMatchObject({
+        nextDueAt: '2026-08-22T12:00:00+09:00',
+      })
+    })
+
+    test('次回期限が無ければnullを返す', async () => {
+      const response = await createHarness(
+        createProgressRepository({ nextDueAt: null }),
+      ).request('/api/study/dashboard', {
+        headers: { cookie: `${GUEST_COOKIE_NAME}=${RAW_TOKEN}` },
+      })
+
+      expect(await response.json()).toMatchObject({ nextDueAt: null })
+    })
   })
 })

@@ -95,6 +95,27 @@ export type StudySessionView = {
   remainingNew: number
 }
 
+/** 活動量に並べる学習日数。1週間ぶんを1行で見せる。 */
+const ACTIVITY_DAYS = 7
+
+/** ダッシュボードに出す進捗。残りは全デッキの合計で返す。 */
+export type StudyDashboardView = {
+  learningDay: string
+  completedToday: number
+  streakDays: number
+  remaining: {
+    review: number
+    learning: number
+    new: number
+  }
+  activity: readonly {
+    learningDay: string
+    reviews: number
+  }[]
+  /** まだ期限が来ていないカードのうち最も早い期限。無ければnull。 */
+  nextDueAt: string | null
+}
+
 /** デッキ一覧に添える当日の残り枚数。 */
 export type DeckQueueView = {
   learningDay: string
@@ -116,6 +137,7 @@ export interface StudyService {
     sessionId: string,
   ): Promise<StudySessionView>
   listDeckQueues(context: ServiceContext): Promise<DeckQueueView>
+  summarizeProgress(context: ServiceContext): Promise<StudyDashboardView>
   submitReview(
     context: ServiceContext,
     input: ReviewSubmitInput,
@@ -215,6 +237,43 @@ export function createStudyService(options: {
         })),
       }
     },
+    async summarizeProgress(context) {
+      const now = toDate(context.now)
+      const learningDay = learningDayOf(context.now)
+      const scope = {
+        principalId: context.actor.principalId,
+        now,
+        learningDay,
+      }
+      const summary = await repository.summarizeProgress({
+        ...scope,
+        days: ACTIVITY_DAYS,
+      })
+      const counts = await repository.countDeckQueues(scope)
+
+      // 画面は合計しか出さないため、足し合わせはここで済ませる。
+      const remaining = counts.reduce(
+        (total, deck) => ({
+          review: total.review + deck.review,
+          learning: total.learning + deck.learning,
+          new: total.new + deck.new,
+        }),
+        { review: 0, learning: 0, new: 0 },
+      )
+
+      return {
+        learningDay,
+        completedToday: summary.completedToday,
+        streakDays: summary.streakDays,
+        remaining,
+        activity: summary.activity,
+        nextDueAt:
+          summary.nextDueAt === null
+            ? null
+            : formatJst(toInstant(summary.nextDueAt)),
+      }
+    },
+
     async submitReview(context, input) {
       const now = toDate(context.now)
       try {

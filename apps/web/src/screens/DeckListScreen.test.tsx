@@ -9,10 +9,21 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** 進捗を見ないテストでは空の集計を返す。 */
+const EMPTY_DASHBOARD = {
+  learningDay: '2026-08-25',
+  completedToday: 0,
+  streakDays: 0,
+  remaining: { review: 0, learning: 0, new: 0 },
+  activity: [],
+  nextDueAt: null,
+}
+
 function renderScreen(
   session: unknown,
   decks: unknown[] = [],
   deckQueues: unknown[] = [],
+  dashboard: unknown = EMPTY_DASHBOARD,
 ) {
   let currentDecks = [...decks]
   const deletedPaths: string[] = []
@@ -42,6 +53,12 @@ function renderScreen(
           deck.id !== deletedId,
       )
       return new Response(null, { status: 204 })
+    }
+    if (path === '/api/study/dashboard') {
+      return new Response(JSON.stringify(dashboard), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
     }
     if (path === '/api/study/decks') {
       return new Response(
@@ -382,5 +399,66 @@ describe('アカウント連携', () => {
 
     await screen.findByRole('heading', { name: '単語帳' })
     expect(screen.queryByRole('button', { name: /連携/ })).toBeNull()
+  })
+
+  describe('進捗', () => {
+    const SESSION = {
+      authenticated: true,
+      kind: 'guest',
+      warning: 'ゲストです。',
+      expiresAt: '2026-08-22T12:00:00+09:00',
+    }
+
+    function dashboard(overrides: Record<string, unknown> = {}) {
+      return {
+        learningDay: '2026-08-21',
+        completedToday: 5,
+        streakDays: 3,
+        remaining: { review: 4, learning: 1, new: 2 },
+        activity: [
+          { learningDay: '2026-08-15', reviews: 0 },
+          { learningDay: '2026-08-16', reviews: 4 },
+          { learningDay: '2026-08-17', reviews: 0 },
+          { learningDay: '2026-08-18', reviews: 2 },
+          { learningDay: '2026-08-19', reviews: 6 },
+          { learningDay: '2026-08-20', reviews: 3 },
+          { learningDay: '2026-08-21', reviews: 5 },
+        ],
+        nextDueAt: '2026-08-22T12:00:00+09:00',
+        ...overrides,
+      }
+    }
+
+    test('今日の完了枚数と連続学習日を出す', async () => {
+      renderScreen(SESSION, [], [], dashboard())
+
+      expect(await screen.findByText(/今日 5枚/)).toBeTruthy()
+      expect(screen.getByText(/連続 3日/)).toBeTruthy()
+    })
+
+    test('残りは全デッキの合計で出す', async () => {
+      renderScreen(SESSION, [], [], dashboard())
+
+      expect(await screen.findByText(/残り 7枚/)).toBeTruthy()
+    })
+
+    test('直近7日の活動量を日付つきで出す', async () => {
+      renderScreen(SESSION, [], [], dashboard())
+
+      expect(await screen.findByLabelText('2026-08-19 6枚')).toBeTruthy()
+      expect(screen.getByLabelText('2026-08-17 0枚')).toBeTruthy()
+    })
+
+    test('次回の期限を日時で伝える', async () => {
+      renderScreen(SESSION, [], [], dashboard())
+
+      expect(await screen.findByText(/2026-08-22 12:00/)).toBeTruthy()
+    })
+
+    test('次回の期限が無ければ予定が無いことを伝える', async () => {
+      renderScreen(SESSION, [], [], dashboard({ nextDueAt: null }))
+
+      expect(await screen.findByText(/次の予定はありません/)).toBeTruthy()
+    })
   })
 })

@@ -50,6 +50,26 @@ export type DeckQueue = {
   remainingNew: number
 }
 
+/** 直近の学習量。`reviews` は取り消しを差し引いた実効枚数。 */
+export type ActivityDay = {
+  learningDay: string
+  reviews: number
+}
+
+/** デッキ一覧の先頭に出す進捗。 */
+export type StudyDashboard = {
+  learningDay: string
+  completedToday: number
+  streakDays: number
+  remaining: {
+    review: number
+    learning: number
+    new: number
+  }
+  activity: readonly ActivityDay[]
+  nextDueAt: string | null
+}
+
 /** カード一覧の1ページ。`total` はゴミ箱を除いたデッキ内の総数。 */
 export type CardPage = {
   cards: readonly CardRecord[]
@@ -223,6 +243,43 @@ function parseDeckQueue(value: unknown): DeckQueue {
     remainingReview: requiredNumber(value, 'remainingReview'),
     remainingLearning: requiredNumber(value, 'remainingLearning'),
     remainingNew: requiredNumber(value, 'remainingNew'),
+  }
+}
+
+function parseActivityDay(value: unknown): ActivityDay {
+  if (!isRecord(value)) {
+    throw new ApiClientError('INVALID_RESPONSE', '学習量を読み込めません。')
+  }
+  return {
+    learningDay: requiredString(value, 'learningDay'),
+    reviews: requiredNumber(value, 'reviews'),
+  }
+}
+
+function parseDashboard(value: unknown): StudyDashboard {
+  if (!isRecord(value) || !Array.isArray(value.activity)) {
+    throw new ApiClientError('INVALID_RESPONSE', '進捗を読み込めません。')
+  }
+  const remaining = value.remaining
+  if (!isRecord(remaining)) {
+    throw new ApiClientError('INVALID_RESPONSE', '進捗を読み込めません。')
+  }
+  const nextDueAt = value.nextDueAt
+  if (nextDueAt !== null && typeof nextDueAt !== 'string') {
+    throw new ApiClientError('INVALID_RESPONSE', '進捗を読み込めません。')
+  }
+
+  return {
+    learningDay: requiredString(value, 'learningDay'),
+    completedToday: requiredNumber(value, 'completedToday'),
+    streakDays: requiredNumber(value, 'streakDays'),
+    remaining: {
+      review: requiredNumber(remaining, 'review'),
+      learning: requiredNumber(remaining, 'learning'),
+      new: requiredNumber(remaining, 'new'),
+    },
+    activity: value.activity.map(parseActivityDay),
+    nextDueAt,
   }
 }
 
@@ -508,6 +565,10 @@ export const apiClient = {
       throw new ApiClientError('INVALID_RESPONSE', '残り枚数を読み込めません。')
     }
     return body.decks.map(parseDeckQueue)
+  },
+  /** デッキ一覧の先頭に出す進捗の集計。 */
+  async dashboard(): Promise<StudyDashboard> {
+    return parseDashboard(await request('/api/study/dashboard'))
   },
   async createDeck(input: DeckCreateInput): Promise<DeckSummary> {
     const body = await request('/api/decks', {

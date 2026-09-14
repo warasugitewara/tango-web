@@ -1,4 +1,15 @@
-import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+} from 'drizzle-orm'
 import { v7 as uuidv7 } from 'uuid'
 import type { Database, DatabaseTransaction } from '../client'
 import { cards, decks } from '../schema/content'
@@ -100,6 +111,30 @@ export type DeckQueueInput = {
   learningDay: string
 }
 
+/** 活動量の1日分。`reviews` は取り消しを差し引いた実効枚数。 */
+export type ActivityDay = {
+  learningDay: string
+  reviews: number
+}
+
+/** ダッシュボードに出す進捗の集計。 */
+export type ProgressSummary = {
+  completedToday: number
+  /** 古い順に `days` 件。評価の無い日も0で埋める。 */
+  activity: readonly ActivityDay[]
+  streakDays: number
+  /** まだ期限が来ていないカードのうち、最も早い期限。 */
+  nextDueAt: Date | null
+}
+
+export type ProgressInput = {
+  principalId: string
+  learningDay: string
+  /** 活動量に並べる学習日数。 */
+  days: number
+  now: Date
+}
+
 export type SubmitReviewInput = {
   principalId: string
   sessionId: string
@@ -166,11 +201,26 @@ const DUE_STATES: readonly FsrsStateValue[] = [
   'relearning',
 ]
 
+/** 連続学習日をさかのぼる上限。無制限に走査させない。 */
+const STREAK_SCAN_DAYS = 365
+
+/**
+ * 学習日 (`YYYY-MM-DD`) を日数ぶんずらす。
+ * 学習日は既に04:00 JST起点で丸めた暦日なので、UTCの日付演算で足りる。
+ */
+function shiftLearningDay(learningDay: string, delta: number): string {
+  const shifted = new Date(`${learningDay}T00:00:00Z`)
+  shifted.setUTCDate(shifted.getUTCDate() + delta)
+  return shifted.toISOString().slice(0, 10)
+}
+
 export interface StudyRepository {
   createSession(input: CreateSessionInput): Promise<string>
   nextCard(input: QueueInput): Promise<QueuedCard | null>
   countRemaining(input: CountInput): Promise<RemainingCounts>
   countDeckQueues(input: DeckQueueInput): Promise<readonly DeckQueueCounts[]>
+  /** ダッシュボードの集計。追記専用の履歴から導出する。 */
+  summarizeProgress(input: ProgressInput): Promise<ProgressSummary>
   submitReview(input: SubmitReviewInput): Promise<ReviewOutcome>
   undoLastReview(input: UndoLastReviewInput): Promise<UndoOutcome>
 }
@@ -563,6 +613,72 @@ export function createStudyRepository(db: Database): StudyRepository {
           new: Math.min(availableNew, allowedNew),
         }
       })
+    },
+
+    async summarizeProgress(input) {
+      // 学習日ごとの実効枚数。取り消しは行を消さず差し引きで表す。
+      const daily = await db
+        .select({
+          learningDay: reviewEvents.learningDay,
+          reviews: sql<number>`sum(
+            case
+              when ${reviewEvents.kind} = 'review' then 1
+              when ${reviewEvents.kind} = 'undo' then -1
+              else 0
+            end
+          )::int`,
+        })
+        .from(reviewEvents)
+        .where(eq(reviewEvents.principalId, input.principalId))
+        .groupBy(reviewEvents.learningDay)
+        .orderBy(desc(reviewEvents.learningDay))
+        .limit(STREAK_SCAN_DAYS)
+
+      const byDay = new Map(daily.map((row) => [row.learningDay, row.reviews]))
+      const reviewsOn = (day: string): number => byDay.get(day) ?? 0
+
+      const activity: ActivityDay[] = []
+      for (let offset = input.days - 1; offset >= 0; offset -= 1) {
+        const day = shiftLearningDay(input.learningDay, -offset)
+        activity.push({
+          learningDay: day,
+          reviews: Math.max(reviewsOn(day), 0),
+        })
+      }
+
+      // 当日がまだ未着手なら前日から数える。朝いちで0日と出さないため。
+      let cursor =
+        reviewsOn(input.learningDay) > 0
+          ? input.learningDay
+          : shiftLearningDay(input.learningDay, -1)
+      let streakDays = 0
+      while (reviewsOn(cursor) > 0 && streakDays < STREAK_SCAN_DAYS) {
+        streakDays += 1
+        cursor = shiftLearningDay(cursor, -1)
+      }
+
+      const [next] = await db
+        .select({ dueAt: cardSchedules.dueAt })
+        .from(cardSchedules)
+        .innerJoin(cards, eq(cards.id, cardSchedules.cardId))
+        .innerJoin(decks, eq(decks.id, cards.deckId))
+        .where(
+          and(
+            eq(decks.principalId, input.principalId),
+            isNull(decks.trashedAt),
+            isNull(cards.trashedAt),
+            gt(cardSchedules.dueAt, input.now),
+          ),
+        )
+        .orderBy(asc(cardSchedules.dueAt))
+        .limit(1)
+
+      return {
+        completedToday: Math.max(reviewsOn(input.learningDay), 0),
+        activity,
+        streakDays,
+        nextDueAt: next?.dueAt ?? null,
+      }
     },
 
     async submitReview(input) {
