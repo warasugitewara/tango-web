@@ -179,6 +179,22 @@ BACKUP_DIR=/var/backups/tango ./backup.sh
 
 バックアップ先は別ディスクまたはProxmox Backup Serverでも複製する。プレリリースではPITRを提供しないため、最後のdump以降の更新は復元できない。
 
+### 4. 復元を試す
+
+取れているだけのバックアップは、戻せる保証が無い。`restore.sh` は既定で
+`tango_restore_<YYYYMMDD>` という別データベースへ復元するため、本番に触れずに試せる。
+
+```sh
+chmod +x restore.sh
+./restore.sh /var/backups/tango/tango-2026-09-14.dump
+```
+
+本番の `tango` そのものへ戻す場合は、先に `tango-app` を停止したうえで
+`--into tango` と `TANGO_RESTORE_CONFIRM=yes` の両方を指定する。片方だけでは実行しない。
+
+**この手順はまだ実機で通していない。** 一度通し、所要時間を
+`docs/todo/production-hardening.md` の記録へ書き足すこと。
+
 ### ロールバック
 
 アプリだけを戻す場合は直前のGit commitへ切り替え、同じ `docker compose ... up -d --build --wait` を実行する。`docker compose down` はDBのnamed volumeを保持するが、`down -v` はデータを消すため実行しない。DBスキーマを戻す必要がある場合は、先にサービスを停止してバックアップから別DBへ復元し、検証後に切り替える。
