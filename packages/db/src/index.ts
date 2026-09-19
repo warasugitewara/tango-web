@@ -10,6 +10,11 @@ export {
   type DatabaseTransaction,
 } from './client'
 export {
+  checkDatabaseReady,
+  expectedTableNames,
+  findMissingTables,
+} from './health'
+export {
   type CardContent,
   type CardRecord,
   type ContentRepository,

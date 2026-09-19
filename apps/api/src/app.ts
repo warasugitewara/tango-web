@@ -51,6 +51,11 @@ export type AppDependencies = {
   contentRepository?: ContentRepository
   studyRepository?: StudyRepository
   fsrsScheduler?: FsrsScheduler
+  /**
+   * 受け入れ可否の判定。DB接続とスキーマの整合を見る。
+   * 省略すると `/health/ready` は常に受け入れ不可を返す。
+   */
+  readiness?: () => Promise<boolean>
   /** 本番ビルドで配信するSPA成果物。省略時はAPI専用で起動する。 */
   spaRoot?: string
 }
@@ -142,6 +147,21 @@ export function createApp(deps: AppDependencies) {
   )
 
   app.get('/health/live', (context) => context.json({ status: 'ok' as const }))
+
+  // 死活と受け入れ可否は別物。liveはプロセスの生存だけを表し、DBの状態では落ちない。
+  // readyはDBまで見る。理由は返さない。接続先や構造が漏れるため。
+  app.get('/health/ready', async (context) => {
+    const check = deps.readiness
+    if (check === undefined) {
+      return context.json({ status: 'unavailable' as const }, 503)
+    }
+
+    const ready = await check().catch(() => false)
+
+    return ready
+      ? context.json({ status: 'ok' as const })
+      : context.json({ status: 'unavailable' as const }, 503)
+  })
 
   app.route(
     '/api',

@@ -1,4 +1,5 @@
 import {
+  checkDatabaseReady,
   createContentRepository,
   createDatabase,
   createPrincipalRepository,
@@ -92,6 +93,8 @@ const app = createApp({
   contentRepository: createContentRepository(database.db),
   studyRepository: createStudyRepository(database.db),
   fsrsScheduler: createFsrsScheduler(DEFAULT_REQUEST_RETENTION),
+  // 監視が見る受け入れ可否。DBへ届き、必要なテーブルが揃っていることを確かめる。
+  readiness: () => checkDatabaseReady(database.db),
   spaRoot: 'apps/web/dist',
 })
 
