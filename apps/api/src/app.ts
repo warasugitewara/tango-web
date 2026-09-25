@@ -9,6 +9,7 @@ import type {
 import { AppError } from '@tango/shared'
 import { Hono } from 'hono'
 import { serveStatic } from 'hono/serve-static'
+import { createAccountRoutes } from './features/auth/account-routes'
 import type { ActorResolver } from './features/auth/actor-resolver'
 import { createAuthRoutes } from './features/auth/auth-routes'
 import type { Clock, GuestService } from './features/auth/guest-service'
@@ -56,7 +57,7 @@ export type AppDependencies = {
   /** アカウント統合に使う。統合の証明鍵と対で渡す。 */
   principalRepository?: Pick<
     PrincipalRepository,
-    'summarizeMergeCandidate' | 'mergeUsers'
+    'summarizeMergeCandidate' | 'mergeUsers' | 'deleteUser'
   >
   /** 統合の証明に署名する鍵。省略すると統合の経路を公開しない。 */
   mergeIntentSecret?: string
@@ -205,6 +206,13 @@ export function createApp(deps: AppDependencies) {
   app.all('/api', () => {
     throw new AppError('NOT_FOUND')
   })
+  if (deps.principalRepository !== undefined) {
+    app.route(
+      '/api',
+      createAccountRoutes({ repository: deps.principalRepository }),
+    )
+  }
+
   // 統合は証明鍵とリポジトリの両方が揃っているときだけ公開する。
   if (
     deps.principalRepository !== undefined &&

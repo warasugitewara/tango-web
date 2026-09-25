@@ -71,6 +71,11 @@ export interface PrincipalRepository {
     now: Date
     expiresAt: Date
   }): Promise<GuestSessionRecord>
+  /**
+   * 利用者の削除。所有するデータは外部キーのcascadeで一緒に消える。
+   * 監査ログは actor を NULL にして残る。追跡は残し、本人への紐付けだけ切る。
+   */
+  deleteUser(userId: string): Promise<boolean>
   /** 統合の比較に出す規模。該当が無ければnull。 */
   summarizeMergeCandidate(userId: string): Promise<MergeCandidate | null>
   /** 正式アカウント同士を統合する。取り込み元は閉じる。 */
@@ -467,6 +472,17 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
 
         return toGuestSessionRecord(row)
       })
+    },
+
+    async deleteUser(userId) {
+      // principals / account / session / decks 以下はすべてcascadeで消える。
+      // audit_logs だけは ON DELETE SET NULL で残る。
+      const rows = await db
+        .delete(user)
+        .where(eq(user.id, userId))
+        .returning({ id: user.id })
+
+      return rows.length > 0
     },
 
     async summarizeMergeCandidate(userId) {

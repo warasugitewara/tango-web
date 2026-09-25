@@ -864,4 +864,91 @@ describe('PrincipalRepository', () => {
       expect(await repository.summarizeMergeCandidate(randomUUID())).toBeNull()
     })
   })
+
+  describe('アカウントの削除', () => {
+    async function createAccountWithData(
+      now: Date,
+    ): Promise<{ userId: string; principalId: string; deckId: string }> {
+      const userId = await insertFormalUser(now)
+      const { principal } = await repository.completeIdentity({
+        userId,
+        guestTokenHash: null,
+        mergeKey: uuidv7(),
+        now,
+      })
+      const deck = await contentRepository.createDeck(
+        principal.id,
+        { name: '英単語' },
+        now,
+      )
+      await contentRepository.createCard(
+        principal.id,
+        deck.id,
+        { front: '表', back: '裏' },
+        now,
+      )
+
+      return { userId, principalId: principal.id, deckId: deck.id }
+    }
+
+    test('所有するデータごと消す', async () => {
+      const now = new Date()
+      const account = await createAccountWithData(now)
+
+      expect(await repository.deleteUser(account.userId)).toBe(true)
+
+      expect(await repository.findByUserId(account.userId)).toBeNull()
+      const decks = await database()
+        .db.select({ id: schema.decks.id })
+        .from(schema.decks)
+        .where(eq(schema.decks.id, account.deckId))
+      expect(decks).toHaveLength(0)
+      expect(await database().db.select().from(schema.cards)).toHaveLength(0)
+    })
+
+    test('他の利用者のデータは消さない', async () => {
+      const now = new Date()
+      const target = await createAccountWithData(now)
+      const other = await createAccountWithData(now)
+
+      await repository.deleteUser(target.userId)
+
+      expect(await repository.findByUserId(other.userId)).not.toBeNull()
+      const decks = await contentRepository.listDecks(other.principalId)
+      expect(decks).toHaveLength(1)
+    })
+
+    test('監査ログは残し、誰の操作かの紐付けだけを切る', async () => {
+      // 不正操作の追跡は残す。ただし本人へ辿れる情報は残さない。
+      const now = new Date()
+      const account = await createAccountWithData(now)
+      await database().db.insert(schema.auditLogs).values({
+        id: uuidv7(),
+        actorPrincipalId: account.principalId,
+        actorUserId: account.userId,
+        requestId: 'request-delete-test',
+        eventType: 'test.event',
+        createdAt: now,
+      })
+
+      await repository.deleteUser(account.userId)
+
+      const logs = await database()
+        .db.select({
+          actorPrincipalId: schema.auditLogs.actorPrincipalId,
+          actorUserId: schema.auditLogs.actorUserId,
+        })
+        .from(schema.auditLogs)
+        .where(eq(schema.auditLogs.requestId, 'request-delete-test'))
+
+      expect(logs).toHaveLength(1)
+      expect(logs[0]?.actorPrincipalId).toBeNull()
+      expect(logs[0]?.actorUserId).toBeNull()
+    })
+
+    test('存在しない利用者の削除は偽を返すだけにする', async () => {
+      // 再送や取り違えを例外にしない。結果は同じ「存在しない」である。
+      expect(await repository.deleteUser(randomUUID())).toBe(false)
+    })
+  })
 })

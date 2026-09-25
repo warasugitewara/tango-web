@@ -82,6 +82,9 @@ function createHarness(
           ? candidate(userId, userId === CURRENT_USER ? 2 : 5)
           : null
       },
+      async deleteUser() {
+        throw new Error('このテストでは使用しない。')
+      },
       async mergeUsers(input) {
         merges.push(input)
         return {

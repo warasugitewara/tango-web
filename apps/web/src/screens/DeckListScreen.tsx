@@ -335,6 +335,7 @@ export function DeckListScreen() {
             <button type="button" onClick={() => signOut.mutate()}>
               ログアウト
             </button>
+            <Link to="/account/delete">アカウントを削除</Link>
           </div>
           {account.providers.length < 2 ? (
             // ボタンを黙って隠すと「壊れている」ように見える。理由を書く。

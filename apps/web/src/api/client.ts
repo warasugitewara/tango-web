@@ -623,6 +623,32 @@ export const apiClient = {
     })
     return isRecord(body) && body.signedOut === true
   },
+  /** 削除の対象になる件数。 */
+  async accountSummary(): Promise<{
+    decks: number
+    cards: number
+    reviews: number
+  }> {
+    const body = await request('/api/account/summary')
+    if (!isRecord(body)) {
+      throw new ApiClientError(
+        'INVALID_RESPONSE',
+        'アカウントの情報を読み込めません。',
+      )
+    }
+    return {
+      decks: requiredNumber(body, 'decks'),
+      cards: requiredNumber(body, 'cards'),
+      reviews: requiredNumber(body, 'reviews'),
+    }
+  },
+  /** アカウントと学習データを消す。取り消せない。 */
+  async deleteAccount(confirm: string): Promise<void> {
+    await request('/api/account/delete', {
+      method: 'POST',
+      body: JSON.stringify({ confirm }),
+    })
+  },
   /** ゲストから正式アカウントへの引き継ぎを確定する。 */
   async completeIdentity(mergeKey: string): Promise<void> {
     await request('/api/identity/complete', {

@@ -1,3 +1,8 @@
+export {
+  ACCOUNT_DELETE_CONFIRMATION,
+  type AccountDeleteInput,
+  accountDeleteSchema,
+} from './contracts/account'
 export type { Actor, ServiceContext } from './contracts/actor'
 export {
   type CardContentInput,

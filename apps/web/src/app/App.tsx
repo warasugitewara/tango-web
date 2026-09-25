@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router'
+import { AccountDeleteScreen } from '../screens/AccountDeleteScreen'
 import { AuthCompleteScreen } from '../screens/AuthCompleteScreen'
 import { DeckDetailScreen } from '../screens/DeckDetailScreen'
 import { DeckListScreen } from '../screens/DeckListScreen'
@@ -22,6 +23,7 @@ export function App() {
           <Route path="/auth/complete" element={<AuthCompleteScreen />} />
           <Route path="/trash" element={<TrashScreen />} />
           <Route path="/auth/merge" element={<MergeScreen />} />
+          <Route path="/account/delete" element={<AccountDeleteScreen />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

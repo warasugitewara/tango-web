@@ -35,6 +35,9 @@ function createFakeRepository(): FakeRepository {
     async mergeUsers() {
       throw new Error('このテストでは使用しない。')
     },
+    async deleteUser() {
+      throw new Error('このテストでは使用しない。')
+    },
     async findByUserId(userId) {
       return principals.find((principal) => principal.userId === userId) ?? null
     },
