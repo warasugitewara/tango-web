@@ -33,6 +33,12 @@ trap 'rm -f "$encrypted"' EXIT HUP INT TERM
 age --encrypt --recipients-file "$recipient_file" --output "$encrypted" "$source_dump"
 
 remote_name="tango-$today.dump.age"
+
+# 世代整理は対象ディレクトリが無いと失敗する。初回のために先に用意する。
+for tier in daily weekly monthly; do
+  rclone mkdir "$remote/$tier"
+done
+
 rclone copyto "$encrypted" "$remote/daily/$remote_name"
 
 # 週次と月次は日次からの複製で作る。dump を取り直さない。
