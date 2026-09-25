@@ -37,8 +37,11 @@ ExecStart として、dump の直後に走る。
   乗っ取られても過去の退避分は復号できない。
 - Drive の権限は `drive.file` スコープ。rclone が作ったファイル以外は見えない。
 - 保持は daily 7 / weekly 4 / monthly 6。手元は 7 世代で整理する。
-- 最終成功時刻を `/var/lib/tango/last-offsite` に記録する。**鮮度監視を入れるまでは
-  ここを週1で見る。** 転送が壊れたまま放置されると、手元の整理だけが進んで痩せていく。
+- 最終成功時刻を `/var/lib/tango/last-offsite` に記録する。
+- 鮮度は Uptime Kuma の push 監視で見る（2026-09-25 に接続）。`notify-backup.sh` を
+  `ExecStartPost` に置き、**全ステップ成功した日だけ** ping する。失敗した日は
+  systemd が ExecStartPost を実行しないため ping が止まり、Kuma 側の heartbeat 切れで
+  検知できる。push URL は `/etc/tango/backup/uptime-push-url`（600、リポジトリには入れない）。
 
 残るのは監視（5）と、PITR（4）。
 
@@ -68,7 +71,8 @@ dump だけでは復旧点が最大24時間前になる。仕様の目標は RPO
 
 ## 5. 監視と通知
 
-- Uptime Kuma: Tunnel 越しに `/health/live` `/health/ready` と OAuth 開始パス。
+- Uptime Kuma: Tunnel 越しに `/health/live` `/health/ready`、およびバックアップの
+  push 監視（heartbeat 26 時間）。
   `/health/ready` は 2026-09-20 に実装した（`d5f83bb`）。DB へ届くことと、スキーマ定義が
   必要とするテーブルが揃っていることを見て、真偽だけを返す。不可は 503、理由は返さない。
   2026-09-20 に本番へ反映済みで、Tunnel 越しにも 200 を返す。あとは Uptime Kuma の
@@ -111,3 +115,4 @@ dump だけでは復旧点が最大24時間前になる。仕様の目標は RPO
 | 2026-09-25 | Google Drive へ退避開始 | `drive.file` スコープ。`offsite.sh` を timer へ連結 |
 | 2026-09-25 | **Drive からの復元を実証** | 取得→復号→別DBへ復元し、行数が本番と一致（327/10/38/6）|
 | 2026-09-25 | 秘密鍵を本番から削除 | 残存なしを確認。公開鍵だけで退避が回ることも確認 |
+| 2026-09-25 | 監視へ ping する経路を接続 | `ExecStartPost` から成功時のみ送信。実機で成功を確認（所要115秒）|
