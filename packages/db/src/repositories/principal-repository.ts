@@ -1,16 +1,21 @@
 import {
   and,
+  asc,
+  count,
   eq,
   gt,
   inArray,
   isNotNull,
   isNull,
   lte,
+  max,
   notExists,
 } from 'drizzle-orm'
 import { v7 as uuidv7 } from 'uuid'
 import type { Database, DatabaseTransaction } from '../client'
 import {
+  account,
+  cards,
   decks,
   guestSessions,
   identityMerges,
@@ -18,6 +23,7 @@ import {
   principals,
   reviewEvents,
   studySessions,
+  user,
   userSettings,
 } from '../schema'
 
@@ -65,6 +71,10 @@ export interface PrincipalRepository {
     now: Date
     expiresAt: Date
   }): Promise<GuestSessionRecord>
+  /** 統合の比較に出す規模。該当が無ければnull。 */
+  summarizeMergeCandidate(userId: string): Promise<MergeCandidate | null>
+  /** 正式アカウント同士を統合する。取り込み元は閉じる。 */
+  mergeUsers(input: MergeUsersInput): Promise<MergeUsersResult>
   completeIdentity(input: {
     userId: string
     guestTokenHash: string | null
@@ -89,6 +99,39 @@ export interface PrincipalRepository {
  * 鍵を再利用・詐称しても他人の学習データや別guestへ到達できないよう、
  * 完了処理をここで打ち切る。
  */
+/** 統合の比較に出す1アカウントぶんの規模。 */
+export type MergeCandidate = {
+  principalId: string
+  userId: string
+  name: string
+  providers: readonly string[]
+  decks: number
+  cards: number
+  reviews: number
+  lastReviewedAt: Date | null
+}
+
+export type MergeUsersInput = {
+  sourceUserId: string
+  targetUserId: string
+  mergeKey: string
+  now: Date
+}
+
+export type MergeUsersResult = {
+  principal: PrincipalRecord
+  /** 統合先へ移したログイン手段。 */
+  movedProviders: readonly string[]
+}
+
+/** 統合の相手として成立しない組み合わせ。 */
+export class InvalidMergeTargetError extends Error {
+  constructor() {
+    super('統合できない組み合わせです。')
+    this.name = 'InvalidMergeTargetError'
+  }
+}
+
 export class IdentityMergeKeyConflictError extends Error {
   constructor() {
     super('この冪等性キーは別の入力に割り当て済みです。')
@@ -423,6 +466,165 @@ export function createPrincipalRepository(db: Database): PrincipalRepository {
         }
 
         return toGuestSessionRecord(row)
+      })
+    },
+
+    async summarizeMergeCandidate(userId) {
+      const [principalRow] = await db
+        .select()
+        .from(principals)
+        .where(eq(principals.userId, userId))
+        .limit(1)
+
+      if (principalRow === undefined) {
+        return null
+      }
+
+      const [userRow] = await db
+        .select({ name: user.name })
+        .from(user)
+        .where(eq(user.id, userId))
+        .limit(1)
+
+      const [deckCount] = await db
+        .select({ value: count(decks.id) })
+        .from(decks)
+        .where(
+          and(eq(decks.principalId, principalRow.id), isNull(decks.trashedAt)),
+        )
+
+      const [cardCount] = await db
+        .select({ value: count(cards.id) })
+        .from(cards)
+        .innerJoin(decks, eq(decks.id, cards.deckId))
+        .where(
+          and(
+            eq(decks.principalId, principalRow.id),
+            isNull(decks.trashedAt),
+            isNull(cards.trashedAt),
+          ),
+        )
+
+      const [reviewCount] = await db
+        .select({
+          value: count(reviewEvents.id),
+          lastReviewedAt: max(reviewEvents.reviewedAt),
+        })
+        .from(reviewEvents)
+        .where(eq(reviewEvents.principalId, principalRow.id))
+
+      const providerRows = await db
+        .select({ providerId: account.providerId })
+        .from(account)
+        .where(eq(account.userId, userId))
+        .orderBy(asc(account.providerId))
+
+      return {
+        principalId: principalRow.id,
+        userId,
+        name: userRow?.name ?? '',
+        providers: providerRows.map((row) => row.providerId),
+        decks: deckCount?.value ?? 0,
+        cards: cardCount?.value ?? 0,
+        reviews: reviewCount?.value ?? 0,
+        lastReviewedAt: reviewCount?.lastReviewedAt ?? null,
+      }
+    },
+
+    async mergeUsers({ sourceUserId, targetUserId, mergeKey, now }) {
+      if (sourceUserId === targetUserId) {
+        throw new InvalidMergeTargetError()
+      }
+
+      return db.transaction(async (tx) => {
+        // 再送は記録済みの結果を返す。二重に移送しない。
+        const [recorded] = await tx
+          .select({ targetPrincipalId: identityMerges.targetPrincipalId })
+          .from(identityMerges)
+          .where(eq(identityMerges.mergeKey, mergeKey))
+          .limit(1)
+
+        if (recorded !== undefined) {
+          const [recordedPrincipal] = await tx
+            .select()
+            .from(principals)
+            .where(eq(principals.id, recorded.targetPrincipalId))
+            .limit(1)
+
+          if (recordedPrincipal === undefined) {
+            throw new IdentityMergeKeyConflictError()
+          }
+
+          return {
+            principal: toPrincipalRecord(recordedPrincipal),
+            movedProviders: [],
+          }
+        }
+
+        const [target] = await tx
+          .select()
+          .from(principals)
+          .where(eq(principals.userId, targetUserId))
+          .limit(1)
+        const [source] = await tx
+          .select()
+          .from(principals)
+          .where(eq(principals.userId, sourceUserId))
+          .limit(1)
+
+        if (target === undefined || source === undefined) {
+          throw new InvalidMergeTargetError()
+        }
+
+        await moveOwnedDomainRows(source.id, target.id, tx)
+
+        // 同じ種類のログインを2行持たせない。解除の判断が破綻するため、
+        // 統合先がまだ持たない種類だけを移す。
+        const ownedRows = await tx
+          .select({ providerId: account.providerId })
+          .from(account)
+          .where(eq(account.userId, targetUserId))
+        const owned = new Set(ownedRows.map((row) => row.providerId))
+
+        const sourceRows = await tx
+          .select({ id: account.id, providerId: account.providerId })
+          .from(account)
+          .where(eq(account.userId, sourceUserId))
+        const movable = sourceRows.filter((row) => !owned.has(row.providerId))
+
+        if (movable.length > 0) {
+          await tx
+            .update(account)
+            .set({ userId: targetUserId })
+            .where(
+              inArray(
+                account.id,
+                movable.map((row) => row.id),
+              ),
+            )
+        }
+
+        // 記録は取り込み元を消す前に入れる。
+        // source_principal_id は削除時に ON DELETE SET NULL でNULLになる。
+        await tx.insert(identityMerges).values({
+          id: uuidv7(),
+          mergeKey,
+          sourcePrincipalId: source.id,
+          sourceGuestTokenHash: null,
+          targetPrincipalId: target.id,
+          status: 'completed',
+          createdAt: now,
+          completedAt: now,
+        })
+
+        // 取り込み元のユーザーを消すと、principalと移さなかったログイン手段が
+        // cascadeで一緒に消える。
+        await tx.delete(user).where(eq(user.id, sourceUserId))
+
+        return {
+          principal: toPrincipalRecord(target),
+          movedProviders: movable.map((row) => row.providerId),
+        }
       })
     },
 

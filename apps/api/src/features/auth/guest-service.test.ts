@@ -28,6 +28,13 @@ function createFakeRepository(): FakeRepository {
   let touches = 0
 
   const repository: PrincipalRepository = {
+    async summarizeMergeCandidate() {
+      // このテストは統合を扱わない。
+      return null
+    },
+    async mergeUsers() {
+      throw new Error('このテストでは使用しない。')
+    },
     async findByUserId(userId) {
       return principals.find((principal) => principal.userId === userId) ?? null
     },

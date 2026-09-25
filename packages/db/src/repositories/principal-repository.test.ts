@@ -644,4 +644,224 @@ describe('PrincipalRepository', () => {
     const afterCommit = await repository.purgeExpiredGuests({ now, limit: 10 })
     expect(afterCommit.deletedPrincipals).toBe(0)
   })
+
+  describe('正式アカウント同士の統合', () => {
+    /** Better Authが作るプロバイダ行を模して1件挿入する。 */
+    async function insertAccount(
+      userId: string,
+      providerId: string,
+      now: Date,
+    ): Promise<void> {
+      await database()
+        .db.insert(schema.account)
+        .values({
+          id: randomUUID(),
+          accountId: `${providerId}-${randomUUID()}`,
+          providerId,
+          userId,
+          createdAt: now,
+          updatedAt: now,
+        })
+    }
+
+    /** ログイン手段と学習データを持つ正式アカウントを1つ用意する。 */
+    async function createAccount(
+      now: Date,
+      providerId: string,
+      deckNames: readonly string[],
+    ): Promise<{ userId: string; principalId: string }> {
+      const userId = await insertFormalUser(now)
+      const { principal } = await repository.completeIdentity({
+        userId,
+        guestTokenHash: null,
+        mergeKey: uuidv7(),
+        now,
+      })
+      await insertAccount(userId, providerId, now)
+
+      for (const name of deckNames) {
+        const deck = await contentRepository.createDeck(
+          principal.id,
+          { name },
+          now,
+        )
+        await contentRepository.createCard(
+          principal.id,
+          deck.id,
+          { front: `表-${name}`, back: `裏-${name}` },
+          now,
+        )
+      }
+
+      return { userId, principalId: principal.id }
+    }
+
+    function providerIdsOf(userId: string) {
+      return database()
+        .db.select({ providerId: schema.account.providerId })
+        .from(schema.account)
+        .where(eq(schema.account.userId, userId))
+    }
+
+    test('取り込み元のデッキを統合先へ移す', async () => {
+      const now = new Date()
+      const target = await createAccount(now, 'google', ['英単語'])
+      const source = await createAccount(now, 'github', ['古典', '数学'])
+
+      await repository.mergeUsers({
+        sourceUserId: source.userId,
+        targetUserId: target.userId,
+        mergeKey: uuidv7(),
+        now,
+      })
+
+      const decks = await contentRepository.listDecks(target.principalId)
+      expect(decks.map((deck) => deck.name).sort()).toEqual([
+        '古典',
+        '数学',
+        '英単語',
+      ])
+    })
+
+    test('取り込み元のプロバイダで統合先へログインできるようにする', async () => {
+      // これができないと、統合しても片方のログイン手段が死ぬ。
+      const now = new Date()
+      const target = await createAccount(now, 'google', [])
+      const source = await createAccount(now, 'github', [])
+
+      await repository.mergeUsers({
+        sourceUserId: source.userId,
+        targetUserId: target.userId,
+        mergeKey: uuidv7(),
+        now,
+      })
+
+      const providers = await providerIdsOf(target.userId)
+      expect(providers.map((row) => row.providerId).sort()).toEqual([
+        'github',
+        'google',
+      ])
+    })
+
+    test('取り込み元のユーザーとprincipalを閉じる', async () => {
+      const now = new Date()
+      const target = await createAccount(now, 'google', [])
+      const source = await createAccount(now, 'github', [])
+
+      await repository.mergeUsers({
+        sourceUserId: source.userId,
+        targetUserId: target.userId,
+        mergeKey: uuidv7(),
+        now,
+      })
+
+      expect(await repository.findByUserId(source.userId)).toBeNull()
+      const users = await database()
+        .db.select({ id: schema.user.id })
+        .from(schema.user)
+        .where(eq(schema.user.id, source.userId))
+      expect(users).toHaveLength(0)
+    })
+
+    test('統合先が既に持つプロバイダを重複させない', async () => {
+      // 同じ種類のログインが2行並ぶと、解除の判断が破綻する。
+      const now = new Date()
+      const target = await createAccount(now, 'google', [])
+      const source = await createAccount(now, 'google', [])
+
+      await repository.mergeUsers({
+        sourceUserId: source.userId,
+        targetUserId: target.userId,
+        mergeKey: uuidv7(),
+        now,
+      })
+
+      const providers = await providerIdsOf(target.userId)
+      expect(providers.map((row) => row.providerId)).toEqual(['google'])
+    })
+
+    test('同じ統合キーの再送で二重に統合しない', async () => {
+      const now = new Date()
+      const target = await createAccount(now, 'google', ['英単語'])
+      const source = await createAccount(now, 'github', ['古典'])
+      const mergeKey = uuidv7()
+
+      const first = await repository.mergeUsers({
+        sourceUserId: source.userId,
+        targetUserId: target.userId,
+        mergeKey,
+        now,
+      })
+      const second = await repository.mergeUsers({
+        sourceUserId: source.userId,
+        targetUserId: target.userId,
+        mergeKey,
+        now,
+      })
+
+      expect(second.principal.id).toBe(first.principal.id)
+      const decks = await contentRepository.listDecks(target.principalId)
+      expect(decks).toHaveLength(2)
+    })
+
+    test('同じユーザー同士の統合は拒否する', async () => {
+      const now = new Date()
+      const account = await createAccount(now, 'google', [])
+
+      await expect(
+        repository.mergeUsers({
+          sourceUserId: account.userId,
+          targetUserId: account.userId,
+          mergeKey: uuidv7(),
+          now,
+        }),
+      ).rejects.toThrow()
+    })
+
+    test('統合の事実を記録する', async () => {
+      const now = new Date()
+      const target = await createAccount(now, 'google', [])
+      const source = await createAccount(now, 'github', [])
+
+      await repository.mergeUsers({
+        sourceUserId: source.userId,
+        targetUserId: target.userId,
+        mergeKey: uuidv7(),
+        now,
+      })
+
+      const merges = await database()
+        .db.select({
+          targetPrincipalId: schema.identityMerges.targetPrincipalId,
+          status: schema.identityMerges.status,
+        })
+        .from(schema.identityMerges)
+      expect(
+        merges.some(
+          (row) =>
+            row.targetPrincipalId === target.principalId &&
+            row.status === 'completed',
+        ),
+      ).toBe(true)
+    })
+
+    test('比較のための件数を返す', async () => {
+      // 画面は「どちらを残すか」をこの数字で選ばせる。
+      const now = new Date()
+      const account = await createAccount(now, 'google', ['英単語', '古典'])
+
+      const summary = await repository.summarizeMergeCandidate(account.userId)
+
+      expect(summary).not.toBeNull()
+      expect(summary?.principalId).toBe(account.principalId)
+      expect(summary?.decks).toBe(2)
+      expect(summary?.cards).toBe(2)
+      expect(summary?.reviews).toBe(0)
+      expect(summary?.providers).toEqual(['google'])
+    })
+
+    test('存在しないユーザーの比較は空で答える', async () => {
+      expect(await repository.summarizeMergeCandidate(randomUUID())).toBeNull()
+    })
+  })
 })
