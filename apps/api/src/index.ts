@@ -95,6 +95,9 @@ const app = createApp({
   fsrsScheduler: createFsrsScheduler(DEFAULT_REQUEST_RETENTION),
   // 監視が見る受け入れ可否。DBへ届き、必要なテーブルが揃っていることを確かめる。
   readiness: () => checkDatabaseReady(database.db),
+  principalRepository: repository,
+  // 用途ごとに鍵を分ける。セッションの鍵をそのまま流用しない。
+  mergeIntentSecret: `${betterAuthSecret}:merge-intent`,
   spaRoot: 'apps/web/dist',
 })
 

@@ -2,6 +2,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type {
   ContentRepository,
+  PrincipalRepository,
   RateLimitRepository,
   StudyRepository,
 } from '@tango/db'
@@ -12,6 +13,8 @@ import type { ActorResolver } from './features/auth/actor-resolver'
 import { createAuthRoutes } from './features/auth/auth-routes'
 import type { Clock, GuestService } from './features/auth/guest-service'
 import type { IdentityCompletionService } from './features/auth/identity-completion-service'
+import { createMergeIntentCodec } from './features/auth/merge-intent'
+import { createMergeRoutes } from './features/auth/merge-routes'
 import { createOAuthErrorRoutes } from './features/auth/oauth-error-page'
 import { createContentRoutes } from './features/content/content-routes'
 import type { FsrsScheduler } from './features/study/fsrs-adapter'
@@ -50,6 +53,13 @@ export type AppDependencies = {
   /** 認証境界だけを検証する既存テストでは省略できる。 */
   contentRepository?: ContentRepository
   studyRepository?: StudyRepository
+  /** アカウント統合に使う。統合の証明鍵と対で渡す。 */
+  principalRepository?: Pick<
+    PrincipalRepository,
+    'summarizeMergeCandidate' | 'mergeUsers'
+  >
+  /** 統合の証明に署名する鍵。省略すると統合の経路を公開しない。 */
+  mergeIntentSecret?: string
   fsrsScheduler?: FsrsScheduler
   /**
    * 受け入れ可否の判定。DB接続とスキーマの整合を見る。
@@ -195,6 +205,21 @@ export function createApp(deps: AppDependencies) {
   app.all('/api', () => {
     throw new AppError('NOT_FOUND')
   })
+  // 統合は証明鍵とリポジトリの両方が揃っているときだけ公開する。
+  if (
+    deps.principalRepository !== undefined &&
+    deps.mergeIntentSecret !== undefined
+  ) {
+    app.route(
+      '/api',
+      createMergeRoutes({
+        repository: deps.principalRepository,
+        codec: createMergeIntentCodec(deps.mergeIntentSecret),
+        cookieSecure: deps.cookieSecure,
+      }),
+    )
+  }
+
   app.all('/api/*', () => {
     throw new AppError('NOT_FOUND')
   })
