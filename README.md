@@ -170,7 +170,9 @@ docker compose --env-file .env -f compose.yml ps
 
 ### 3. 1日1回バックアップする
 
-`backup.sh` はJSTの日付ごとに1個だけ、既定で `/var/backups/tango` へPostgreSQL custom dumpを原子的に保存する。rootのcronまたはsystemd timerから1日1回実行する。
+`backup.sh` はJSTの日付ごとに1個だけ、既定で `/var/backups/tango` へPostgreSQL custom dumpを原子的に保存する。続けて `offsite.sh` が age で暗号化し、rclone で Google Drive へ送る。本番には age の公開鍵しか置かないため、退避分をこの LXC 上で復号することはできない。
+
+どちらも `tango-backup.timer`（毎日 02:00 JST）から `tango-backup.service` 経由で走る。
 
 ```sh
 chmod +x backup.sh
@@ -191,6 +193,15 @@ chmod +x restore.sh
 
 本番の `tango` そのものへ戻す場合は、先に `tango-app` を停止したうえで
 `--into tango` と `TANGO_RESTORE_CONFIRM=yes` の両方を指定する。片方だけでは実行しない。
+
+LXC ごと失った場合は Google Drive の退避分から戻す。復号には手元に保管した age の
+秘密鍵が要る。**本番には公開鍵しか置いていない。**
+
+```sh
+rclone copyto tango-drive:tango-backups/daily/tango-2026-09-25.dump.age ./x.age
+age -d -i <秘密鍵のパス> -o ./x.dump ./x.age
+./restore.sh ./x.dump
+```
 
 **この手順はまだ実機で通していない。** 一度通し、所要時間を
 `docs/todo/production-hardening.md` の記録へ書き足すこと。

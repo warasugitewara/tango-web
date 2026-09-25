@@ -29,11 +29,18 @@
 定期実行は 2026-09-19 に設定した。`tango-backup.timer`（systemd）が毎日 02:00 JST に
 `backup.sh` を起動する。`Persistent=true` なので、停止していた間の分も起動後に1回走る。
 
-残る穴は**置き場所**。同じ LXC の `/var/backups/tango` にしかない。LXC ごと失うと dump も消える。
+置き場所も 2026-09-25 に塞いだ。`offsite.sh` が dump を age で暗号化し、rclone で
+Google Drive（`tango-drive:tango-backups`）へ送る。`tango-backup.service` の 2 本目の
+ExecStart として、dump の直後に走る。
 
-- 別障害ドメインへ複製する。Proxmox Backup Server か NAS。
-- 保持は仕様どおり daily 7 / weekly 4 / monthly 6。
-- 複製の失敗を検知できるようにする（4 の監視と合わせる）。
+- 本番に置くのは age の**公開鍵だけ**。秘密鍵は手元に保管しており、この LXC が
+  乗っ取られても過去の退避分は復号できない。
+- Drive の権限は `drive.file` スコープ。rclone が作ったファイル以外は見えない。
+- 保持は daily 7 / weekly 4 / monthly 6。手元は 7 世代で整理する。
+- 最終成功時刻を `/var/lib/tango/last-offsite` に記録する。**鮮度監視を入れるまでは
+  ここを週1で見る。** 転送が壊れたまま放置されると、手元の整理だけが進んで痩せていく。
+
+残るのは監視（5）と、PITR（4）。
 
 ## 3. App / DB の LXC 分離
 
@@ -100,3 +107,6 @@ dump だけでは復旧点が最大24時間前になる。仕様の目標は RPO
 | 2026-09-20 | デプロイ前バックアップ | `tango-2026-09-20.dump` |
 | 2026-09-20 | 本番を `7a47f54` へ更新 | healthy。ready は 200、データ不変（migrations 11 のまま） |
 | 2026-09-21 | 自動バックアップの初回 | 02:00:11 に timer が起動し成功。3世代目 |
+| 2026-09-25 | age 鍵を生成 | 公開鍵のみ本番へ。秘密鍵は手元で保管 |
+| 2026-09-25 | Google Drive へ退避開始 | `drive.file` スコープ。`offsite.sh` を timer へ連結 |
+| 2026-09-25 | **Drive からの復元を実証** | 取得→復号→別DBへ復元し、行数が本番と一致（327/10/38/6）|
