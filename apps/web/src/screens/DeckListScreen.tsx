@@ -156,6 +156,28 @@ export function DeckListScreen() {
   }
 
   /** 連携を開始する。サインインと同じくブラウザから遷移させる。 */
+  /**
+   * 別アカウントとの統合を始める。
+   * 連携ではなく通常のログインを通す。連携は「未使用のプロバイダ」しか
+   * 受け付けないため、既に別アカウントで使われている場合に進めないため。
+   */
+  const startMerge = (provider: ProviderId) => {
+    setLinkError(null)
+    apiClient
+      .startMerge()
+      .then(() => apiClient.signInUrl(provider, '/auth/merge'))
+      .then((url) => {
+        window.location.href = url
+      })
+      .catch((error: unknown) => {
+        setLinkError(
+          error instanceof Error
+            ? error.message
+            : '統合を開始できませんでした。',
+        )
+      })
+  }
+
   const startLink = (provider: ProviderId) => {
     setLinkError(null)
     apiClient
@@ -285,6 +307,17 @@ export function DeckListScreen() {
                 {provider.label}を連携
               </button>
             ))}
+            {PROVIDERS.filter(
+              (provider) => !account.providers.includes(provider.id),
+            ).map((provider) => (
+              <button
+                key={`merge-${provider.id}`}
+                type="button"
+                onClick={() => startMerge(provider.id)}
+              >
+                {provider.label}の別アカウントとまとめる
+              </button>
+            ))}
             {/* 最後の1つを解除するとログイン手段を失うため、複数あるときだけ出す。 */}
             {account.providers.length < 2
               ? null
@@ -303,6 +336,13 @@ export function DeckListScreen() {
               ログアウト
             </button>
           </div>
+          {account.providers.length < 2 ? (
+            // ボタンを黙って隠すと「壊れている」ように見える。理由を書く。
+            <p className="account-note">
+              ログイン方法が1つだけのため、連携は解除できません。
+              もう1つ連携すると解除できるようになります。
+            </p>
+          ) : null}
           {linkError === null ? null : <p role="alert">{linkError}</p>}
         </aside>
       )}

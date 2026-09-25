@@ -70,6 +70,22 @@ export type StudyDashboard = {
   nextDueAt: string | null
 }
 
+/** アカウント統合の比較に出す、片方ぶんの規模。 */
+export type MergeCandidateView = {
+  userId: string
+  name: string
+  providers: readonly string[]
+  decks: number
+  cards: number
+  reviews: number
+  lastReviewedAt: string | null
+}
+
+export type MergePreview = {
+  current: MergeCandidateView
+  other: MergeCandidateView
+}
+
 /** 書き出したデッキの中身。取り込みと同じ封筒。 */
 export type DeckExport = {
   schema: 'tango.content'
@@ -287,6 +303,28 @@ function parseDashboard(value: unknown): StudyDashboard {
     },
     activity: value.activity.map(parseActivityDay),
     nextDueAt,
+  }
+}
+
+function parseMergeCandidate(value: unknown): MergeCandidateView {
+  if (!isRecord(value) || !Array.isArray(value.providers)) {
+    throw new ApiClientError('INVALID_RESPONSE', '統合の情報を読み込めません。')
+  }
+  const lastReviewedAt = value.lastReviewedAt
+  if (lastReviewedAt !== null && typeof lastReviewedAt !== 'string') {
+    throw new ApiClientError('INVALID_RESPONSE', '統合の情報を読み込めません。')
+  }
+
+  return {
+    userId: requiredString(value, 'userId'),
+    name: requiredString(value, 'name'),
+    providers: value.providers.map((provider) =>
+      typeof provider === 'string' ? provider : '',
+    ),
+    decks: requiredNumber(value, 'decks'),
+    cards: requiredNumber(value, 'cards'),
+    reviews: requiredNumber(value, 'reviews'),
+    lastReviewedAt,
   }
 }
 
@@ -519,10 +557,13 @@ export const apiClient = {
    * Better Authはサインイン応答で署名済みstate Cookieを張り、
    * コールバックで突き合わせる。必ずブラウザから呼ぶこと。
    */
-  async signInUrl(provider: 'google' | 'github'): Promise<string> {
+  async signInUrl(
+    provider: 'google' | 'github',
+    callbackURL = '/auth/complete',
+  ): Promise<string> {
     const body = await request('/api/auth/sign-in/social', {
       method: 'POST',
-      body: JSON.stringify({ provider, callbackURL: '/auth/complete' }),
+      body: JSON.stringify({ provider, callbackURL }),
     })
     if (!isRecord(body) || typeof body.url !== 'string') {
       throw new ApiClientError(
@@ -555,6 +596,32 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ providerId: provider }),
     })
+  },
+  /** 別アカウントとの統合を始める。証明のCookieをサーバが発行する。 */
+  async startMerge(): Promise<void> {
+    await request('/api/identity/merge/start', { method: 'POST' })
+  },
+  /** 統合するアカウント双方の規模。 */
+  async mergePreview(): Promise<MergePreview> {
+    const body = await request('/api/identity/merge/preview')
+    if (!isRecord(body)) {
+      throw new ApiClientError(
+        'INVALID_RESPONSE',
+        '統合の情報を読み込めません。',
+      )
+    }
+    return {
+      current: parseMergeCandidate(body.current),
+      other: parseMergeCandidate(body.other),
+    }
+  },
+  /** 統合を確定する。`signedOut` が真なら、いまのセッションは消えている。 */
+  async confirmMerge(keep: 'current' | 'other'): Promise<boolean> {
+    const body = await request('/api/identity/merge/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ keep }),
+    })
+    return isRecord(body) && body.signedOut === true
   },
   /** ゲストから正式アカウントへの引き継ぎを確定する。 */
   async completeIdentity(mergeKey: string): Promise<void> {

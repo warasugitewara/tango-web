@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router'
 import { AuthCompleteScreen } from '../screens/AuthCompleteScreen'
 import { DeckDetailScreen } from '../screens/DeckDetailScreen'
 import { DeckListScreen } from '../screens/DeckListScreen'
+import { MergeScreen } from '../screens/MergeScreen'
 import { StudyScreen } from '../screens/StudyScreen'
 import { TrashScreen } from '../screens/TrashScreen'
 
@@ -20,6 +21,7 @@ export function App() {
           <Route path="/study" element={<StudyScreen />} />
           <Route path="/auth/complete" element={<AuthCompleteScreen />} />
           <Route path="/trash" element={<TrashScreen />} />
+          <Route path="/auth/merge" element={<MergeScreen />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

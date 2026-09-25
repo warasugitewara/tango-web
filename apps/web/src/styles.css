@@ -184,6 +184,56 @@ button:disabled {
   color: #607278;
 }
 
+.merge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin: 24px 0;
+}
+
+.merge-column {
+  padding: 20px 22px;
+  background: #f9fbfa;
+  border: 1px solid #c8d6d3;
+}
+
+.merge-role {
+  color: #607278;
+}
+
+.merge-column h2 {
+  margin: 4px 0 8px;
+  font-size: 1.25rem;
+}
+
+.merge-figures {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.merge-figures > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e3eae8;
+}
+
+.merge-figures dt {
+  color: #607278;
+}
+
+.merge-figures dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.account-note {
+  margin-top: 12px;
+  color: #607278;
+}
+
 .guest-warning {
   margin: 24px 0;
   padding: 14px 18px;
@@ -620,6 +670,10 @@ textarea {
 
   .deck-card {
     gap: 14px;
+  }
+
+  .merge-grid {
+    grid-template-columns: 1fr;
   }
 
   .card-form,
