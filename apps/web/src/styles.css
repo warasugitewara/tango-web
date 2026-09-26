@@ -1,6 +1,49 @@
+/*
+ * 色の役割。値はここだけに置く。
+ * 画面側は役割の名前で参照し、配色の変更はこのブロックだけで済むようにする。
+ */
 :root {
-  color: #17252b;
-  background: #edf3f2;
+  --ink: #17252b;
+  --ground: #edf3f2;
+  --surface: #f9fbfa;
+  --surface-sunk: #f2f6f4;
+  --surface-translucent: rgba(249, 251, 250, 0.82);
+  --fill-subtle: #e3eae8;
+  --field: white;
+  --line: #c8d6d3;
+  --line-strong: #b7c8c5;
+  --line-field: #aebfbc;
+  --grid-line: rgba(49, 92, 117, 0.04);
+
+  --accent: #315c75;
+  --accent-strong: #254f68;
+  --accent-soft: #7895a0;
+  --on-accent: white;
+
+  --muted: #607278;
+  --text-lead: #4d6268;
+  --text-secondary: #4a5f66;
+  --disabled: #8d9c9f;
+
+  --focus: #ed6a4a;
+  --warn-ink: #7f2f20;
+  --warn-bg: #fff0eb;
+  --warn-line: #ed6a4a;
+  --danger: #9b3d2a;
+  --again-ink: #8a3829;
+  --again-line: #dc9b8c;
+
+  --activity-1: #bcd3cd;
+  --activity-2: #7aa79c;
+
+  --shadow-welcome: 0 24px 70px rgba(23, 37, 43, 0.12);
+  --shadow-popover: 0 18px 48px rgba(23, 37, 43, 0.18);
+  --shadow-card: 0 24px 70px rgba(23, 37, 43, 0.1);
+}
+
+:root {
+  color: var(--ink);
+  background: var(--ground);
   font-family:
     "Yu Gothic UI", "Yu Gothic", "Hiragino Kaku Gothic ProN", sans-serif;
   font-synthesis: none;
@@ -15,9 +58,9 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    linear-gradient(90deg, rgba(49, 92, 117, 0.04) 1px, transparent 1px) 0 0 /
-    32px 32px,
-    #edf3f2;
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 32px
+    32px,
+    var(--ground);
 }
 
 button,
@@ -33,7 +76,7 @@ a {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible {
-  outline: 3px solid #ed6a4a;
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
 
@@ -53,15 +96,15 @@ input:focus-visible {
 .welcome-card {
   width: min(620px, 100%);
   padding: clamp(32px, 7vw, 72px);
-  background: #f9fbfa;
-  border: 1px solid #c8d6d3;
-  border-left: 12px solid #315c75;
-  box-shadow: 0 24px 70px rgba(23, 37, 43, 0.12);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 12px solid var(--accent);
+  box-shadow: var(--shadow-welcome);
 }
 
 .eyebrow {
   margin: 0 0 12px;
-  color: #315c75;
+  color: var(--accent);
   font:
     700 0.74rem / 1.2 ui-monospace,
     "Cascadia Mono",
@@ -84,7 +127,7 @@ h1 {
 
 .lead {
   max-width: 35rem;
-  color: #4d6268;
+  color: var(--text-lead);
   line-height: 1.9;
 }
 
@@ -92,8 +135,8 @@ h1 {
 .inline-form button,
 .study-link {
   border: 0;
-  background: #315c75;
-  color: white;
+  background: var(--accent);
+  color: var(--on-accent);
   font-weight: 700;
   text-decoration: none;
   cursor: pointer;
@@ -122,7 +165,7 @@ button:disabled {
   justify-content: space-between;
   gap: 24px;
   padding-bottom: 24px;
-  border-bottom: 1px solid #b7c8c5;
+  border-bottom: 1px solid var(--line-strong);
 }
 
 .page-header h1 {
@@ -142,8 +185,8 @@ button:disabled {
 .progress-panel {
   margin: 24px 0;
   padding: 16px 18px;
-  background: #f9fbfa;
-  border: 1px solid #c8d6d3;
+  background: var(--surface);
+  border: 1px solid var(--line);
 }
 
 .progress-figures {
@@ -164,24 +207,24 @@ button:disabled {
 .activity-cell {
   width: 26px;
   height: 26px;
-  background: #e3eae8;
-  border: 1px solid #c8d6d3;
+  background: var(--fill-subtle);
+  border: 1px solid var(--line);
 }
 
 .activity-cell[data-level="1"] {
-  background: #bcd3cd;
+  background: var(--activity-1);
 }
 
 .activity-cell[data-level="2"] {
-  background: #7aa79c;
+  background: var(--activity-2);
 }
 
 .activity-cell[data-level="3"] {
-  background: #315c75;
+  background: var(--accent);
 }
 
 .activity-note {
-  color: #607278;
+  color: var(--muted);
 }
 
 .merge-grid {
@@ -193,12 +236,12 @@ button:disabled {
 
 .merge-column {
   padding: 20px 22px;
-  background: #f9fbfa;
-  border: 1px solid #c8d6d3;
+  background: var(--surface);
+  border: 1px solid var(--line);
 }
 
 .merge-role {
-  color: #607278;
+  color: var(--muted);
 }
 
 .merge-column h2 {
@@ -217,11 +260,11 @@ button:disabled {
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #e3eae8;
+  border-bottom: 1px solid var(--fill-subtle);
 }
 
 .merge-figures dt {
-  color: #607278;
+  color: var(--muted);
 }
 
 .merge-figures dd {
@@ -231,23 +274,23 @@ button:disabled {
 
 .account-note {
   margin-top: 12px;
-  color: #607278;
+  color: var(--muted);
 }
 
 .guest-warning {
   margin: 24px 0;
   padding: 14px 18px;
-  color: #7f2f20;
-  background: #fff0eb;
-  border-left: 5px solid #ed6a4a;
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  border-left: 5px solid var(--warn-line);
   line-height: 1.7;
 }
 
 .deck-create {
   margin: 36px 0;
   padding: 24px;
-  background: rgba(249, 251, 250, 0.82);
-  border: 1px solid #c8d6d3;
+  background: var(--surface-translucent);
+  border: 1px solid var(--line);
 }
 
 .deck-create label {
@@ -265,9 +308,9 @@ button:disabled {
 .inline-form input {
   min-width: 0;
   padding: 12px 14px;
-  color: #17252b;
-  background: white;
-  border: 1px solid #aebfbc;
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--line-field);
 }
 
 .inline-form button {
@@ -286,8 +329,8 @@ button:disabled {
   gap: 20px 32px;
   overflow: hidden;
   padding: 24px 24px 20px 34px;
-  background: #f9fbfa;
-  border: 1px solid #c8d6d3;
+  background: var(--surface);
+  border: 1px solid var(--line);
   transition:
     transform 150ms ease,
     border-color 150ms ease;
@@ -295,14 +338,14 @@ button:disabled {
 
 .deck-card:hover {
   transform: translateY(-2px);
-  border-color: #7895a0;
+  border-color: var(--accent-soft);
 }
 
 .deck-tab {
   position: absolute;
   inset: 0 auto 0 0;
   width: 9px;
-  background: #315c75;
+  background: var(--accent);
 }
 
 .deck-card h2,
@@ -313,7 +356,7 @@ button:disabled {
 
 .deck-card p,
 .deck-meta {
-  color: #607278;
+  color: var(--muted);
 }
 
 .deck-meta,
@@ -331,18 +374,18 @@ button:disabled {
 }
 
 .deck-today {
-  color: #315c75;
+  color: var(--accent);
 }
 
 .deck-actions a {
-  color: #254f68;
+  color: var(--accent-strong);
   font-weight: 700;
 }
 
 .empty-state,
 .error-panel,
 .form-error {
-  color: #7f2f20;
+  color: var(--warn-ink);
 }
 
 .detail-header {
@@ -354,11 +397,11 @@ button:disabled {
 }
 
 .detail-header a {
-  color: #315c75;
+  color: var(--accent);
 }
 
 .detail-header .study-link {
-  color: white;
+  color: var(--on-accent);
 }
 
 .detail-header h1 {
@@ -369,8 +412,8 @@ button:disabled {
 .content-panel {
   margin-bottom: 18px;
   padding: 24px;
-  background: #f9fbfa;
-  border: 1px solid #c8d6d3;
+  background: var(--surface);
+  border: 1px solid var(--line);
 }
 
 .card-form,
@@ -404,9 +447,9 @@ textarea,
 select {
   width: 100%;
   padding: 10px 12px;
-  color: #17252b;
-  background: white;
-  border: 1px solid #aebfbc;
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--line-field);
   font: inherit;
 }
 
@@ -421,8 +464,8 @@ textarea {
 .card-edit button {
   padding: 11px 16px;
   border: 0;
-  background: #315c75;
-  color: white;
+  background: var(--accent);
+  color: var(--on-accent);
   font-weight: 700;
 }
 
@@ -433,7 +476,7 @@ textarea {
 }
 
 .card-range {
-  color: #4a5f66;
+  color: var(--text-secondary);
   font-weight: 700;
 }
 
@@ -446,15 +489,15 @@ textarea {
 
 .card-paging button {
   padding: 10px 18px;
-  border: 1px solid #aebfbc;
-  background: white;
-  color: #17252b;
+  border: 1px solid var(--line-field);
+  background: var(--field);
+  color: var(--ink);
   font: inherit;
   font-weight: 700;
 }
 
 .card-paging button:disabled {
-  color: #8d9c9f;
+  color: var(--disabled);
   cursor: not-allowed;
 }
 
@@ -465,13 +508,13 @@ textarea {
   gap: 20px;
   align-items: start;
   padding: 20px;
-  background: #f9fbfa;
-  border: 1px solid #c8d6d3;
+  background: var(--surface);
+  border: 1px solid var(--line);
 }
 
 .card-number,
 .card-face > span {
-  color: #607278;
+  color: var(--muted);
   font:
     700 0.72rem / 1.4 ui-monospace,
     "Cascadia Mono",
@@ -491,7 +534,7 @@ textarea {
 }
 
 .card-edit summary {
-  color: #315c75;
+  color: var(--accent);
   cursor: pointer;
   font-weight: 700;
 }
@@ -502,14 +545,14 @@ textarea {
   right: 32px;
   width: min(460px, calc(100vw - 48px));
   padding: 18px;
-  background: white;
-  border: 1px solid #7895a0;
-  box-shadow: 0 18px 48px rgba(23, 37, 43, 0.18);
+  background: var(--field);
+  border: 1px solid var(--accent-soft);
+  box-shadow: var(--shadow-popover);
 }
 
 .danger-button {
   padding: 0;
-  color: #9b3d2a;
+  color: var(--danger);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -532,7 +575,7 @@ textarea {
 }
 
 .study-header a {
-  color: #315c75;
+  color: var(--accent);
   font-weight: 700;
 }
 
@@ -552,7 +595,7 @@ textarea {
   gap: 8px 18px;
   margin: 0;
   padding: 0;
-  color: #607278;
+  color: var(--muted);
   border: 0;
   font:
     650 0.78rem / 1.4 ui-monospace,
@@ -561,15 +604,15 @@ textarea {
 }
 
 .remaining-counts strong {
-  color: #17252b;
+  color: var(--ink);
 }
 
 .study-card {
   min-height: 430px;
-  background: #f9fbfa;
-  border: 1px solid #b7c8c5;
-  border-top: 9px solid #315c75;
-  box-shadow: 0 24px 70px rgba(23, 37, 43, 0.1);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-top: 9px solid var(--accent);
+  box-shadow: var(--shadow-card);
 }
 
 .study-face {
@@ -582,8 +625,8 @@ textarea {
 }
 
 .study-back {
-  border-top: 1px dashed #aebfbc;
-  background: #f2f6f4;
+  border-top: 1px dashed var(--line-field);
+  background: var(--surface-sunk);
 }
 
 .study-face .eyebrow {
@@ -595,8 +638,8 @@ textarea {
   width: min(340px, 100%);
   margin: 24px auto 0;
   padding: 15px 20px;
-  color: white;
-  background: #315c75;
+  color: var(--on-accent);
+  background: var(--accent);
   border: 0;
   cursor: pointer;
   font-weight: 700;
@@ -615,19 +658,19 @@ textarea {
   display: grid;
   gap: 7px;
   padding: 14px 10px;
-  color: #17252b;
-  background: #f9fbfa;
-  border: 1px solid #aebfbc;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-field);
   cursor: pointer;
 }
 
 .rating-grid button:first-child {
-  color: #8a3829;
-  border-color: #dc9b8c;
+  color: var(--again-ink);
+  border-color: var(--again-line);
 }
 
 .rating-grid strong {
-  color: #315c75;
+  color: var(--accent);
   font-size: 0.8rem;
 }
 

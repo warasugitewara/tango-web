@@ -12,6 +12,7 @@ import {
   test,
   vi,
 } from 'vitest'
+import { contrastRatio, resolveCssVariables } from '../test/css'
 import { DeckDetailScreen } from './DeckDetailScreen'
 
 const DECK_ID = '019fd000-0000-7000-8000-000000000010'
@@ -19,9 +20,9 @@ let styleElement: HTMLStyleElement
 
 beforeAll(() => {
   styleElement = document.createElement('style')
-  styleElement.textContent = readFileSync(
-    resolve(process.cwd(), 'apps/web/src/styles.css'),
-    'utf8',
+  // jsdom は var() を解決しないため、トークンを展開してから読み込む。
+  styleElement.textContent = resolveCssVariables(
+    readFileSync(resolve(process.cwd(), 'apps/web/src/styles.css'), 'utf8'),
   )
   document.head.append(styleElement)
 })
@@ -176,7 +177,13 @@ describe('DeckDetailScreen', () => {
     })
     const style = window.getComputedStyle(studyLink)
 
-    expect(style.backgroundColor).toBe('rgb(49, 92, 117)')
+    // 背景が透明のままだと黒として計算され、比が最大になって素通りする。
+    expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+    // 守りたいのは「読めること」で、特定の色ではない。
+    // 配色を変えてもこの基準（WCAG 本文 4.5）を下回らないことを確かめる。
+    expect(
+      contrastRatio(style.color, style.backgroundColor),
+    ).toBeGreaterThanOrEqual(4.5)
     expect(style.color).toBe('rgb(255, 255, 255)')
   })
 
