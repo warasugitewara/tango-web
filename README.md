@@ -179,6 +179,14 @@ chmod +x backup.sh
 BACKUP_DIR=/var/backups/tango ./backup.sh
 ```
 
+アプリを更新する前は `--predeploy` を付けて取る。こちらは時刻付きの名前
+（`tango-predeploy-YYYYMMDD-HHMMSS.dump`）で毎回必ず作るため、同じ日に何度更新しても
+それぞれの直前の状態へ戻れる。手元には新しい順に 5 本だけ残す。
+
+```sh
+BACKUP_DIR=/var/backups/tango sh backup.sh --predeploy
+```
+
 バックアップ先は別ディスクまたはProxmox Backup Serverでも複製する。プレリリースではPITRを提供しないため、最後のdump以降の更新は復元できない。
 
 ### 4. 復元を試す
