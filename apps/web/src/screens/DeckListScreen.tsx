@@ -205,7 +205,6 @@ export function DeckListScreen() {
     return (
       <main className="welcome-shell">
         <section className="welcome-card">
-          <p className="eyebrow">TANGO / PRE-RELEASE</p>
           <h1>覚えるものを、ここに束ねる。</h1>
           <p className="lead">
             単語や用語をカードにして、忘れる少し前にもう一度。
@@ -239,7 +238,6 @@ export function DeckListScreen() {
     <main className="shell">
       <header className="page-header">
         <div>
-          <p className="eyebrow">TANGO / PRE-RELEASE</p>
           <h1>単語帳</h1>
         </div>
         <div className="header-links">
@@ -293,9 +291,11 @@ export function DeckListScreen() {
 
       {account === null ? null : (
         <aside className="account-bar">
-          <p>{account.user.name}</p>
-          <p>連携中: {linkedLabels(account.providers)}</p>
-          <div className="inline-form">
+          <p className="account-who">
+            {account.user.name}
+            <span>連携中: {linkedLabels(account.providers)}</span>
+          </p>
+          <div className="account-actions">
             {PROVIDERS.filter(
               (provider) => !account.providers.includes(provider.id),
             ).map((provider) => (

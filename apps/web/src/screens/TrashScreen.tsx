@@ -46,7 +46,6 @@ export function TrashScreen() {
     <main className="shell">
       <header className="page-header">
         <div>
-          <p className="eyebrow">TANGO / TRASH</p>
           <h1>ゴミ箱</h1>
         </div>
         <Link className="study-link" to="/">

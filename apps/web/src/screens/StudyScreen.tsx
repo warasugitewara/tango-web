@@ -123,7 +123,6 @@ export function StudyScreen() {
   if (view.card === null || view.intervalPreviews === null) {
     return (
       <main className="study-shell study-complete">
-        <p className="eyebrow">TODAY COMPLETE</p>
         <h1>今日の学習は完了です</h1>
         <Link className="study-link" to="/">
           単語帳へ戻る
@@ -147,12 +146,12 @@ export function StudyScreen() {
 
       <article className="study-card">
         <section className="study-face" aria-label="表">
-          <span className="eyebrow">FRONT</span>
+          <span className="face-label">表</span>
           <CardMarkdown text={view.card.front} />
         </section>
         {revealed ? (
           <section className="study-face study-back" aria-label="裏">
-            <span className="eyebrow">BACK</span>
+            <span className="face-label">裏</span>
             <CardMarkdown text={view.card.back} />
           </section>
         ) : null}
