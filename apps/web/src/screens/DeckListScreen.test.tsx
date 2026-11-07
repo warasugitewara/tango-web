@@ -1,6 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { DeckListScreen } from './DeckListScreen'
 
@@ -89,11 +95,23 @@ function renderScreen(
 }
 
 describe('DeckListScreen', () => {
-  test('セッションが無ければ「はじめる」だけを出す', async () => {
+  test('セッションが無ければ「はじめる」とログインだけを出す', async () => {
     renderScreen({ authenticated: false })
 
     expect(await screen.findByRole('button', { name: 'はじめる' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'デッキを作成' })).toBeNull()
+  })
+
+  test('別の端末から戻った人は、ゲストを作らずにログインできる', async () => {
+    renderScreen({ authenticated: false })
+
+    expect(await screen.findByText('アカウントをお持ちの方')).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Googleでログイン' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'GitHubでログイン' }),
+    ).toBeTruthy()
   })
 
   test('ゲストでも単語帳の見出しを出す', async () => {
@@ -196,6 +214,9 @@ describe('DeckListScreen', () => {
     ).toBeTruthy()
     expect(screen.queryByText('デモ')).toBeNull()
     expect(deletedPaths).toEqual([`/api/decks/${demoId}`])
+    // 消したあとも、その場で戻せる手段を出す。
+    expect(screen.getByText('「デモ」をゴミ箱へ移しました。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '元に戻す' })).toBeTruthy()
   })
 
   test('削除確認を取り消した場合はデッキを残す', async () => {
@@ -460,5 +481,136 @@ describe('アカウント連携', () => {
 
       expect(await screen.findByText(/次の予定はありません/)).toBeTruthy()
     })
+  })
+})
+
+describe('画面の移り変わり', () => {
+  const guest = {
+    authenticated: true,
+    kind: 'guest',
+    expiresAt: '2026-11-19T12:00:00+09:00',
+    warning: 'Cookieを削除すると復元できません。',
+  }
+  const user = {
+    authenticated: true,
+    kind: 'user',
+    user: { id: 'user-1', name: 'テスト太郎', image: null },
+    providers: ['google'],
+  }
+  const newDeckId = '019fd000-0000-7000-8000-000000000099'
+
+  function renderRouted(initialSession: unknown) {
+    let session = initialSession
+    const requested: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(String(input), 'https://tango.test').pathname
+        requested.push(`${init?.method ?? 'GET'} ${path}`)
+        if (path === '/api/security/csrf') {
+          return Response.json({ csrfToken: 'test-token' })
+        }
+        if (path === '/api/session') {
+          return Response.json(session)
+        }
+        if (path === '/api/auth/sign-out') {
+          session = { authenticated: false }
+          return Response.json({ success: true })
+        }
+        if (path === '/api/decks' && init?.method === 'POST') {
+          return Response.json(
+            {
+              deck: {
+                id: newDeckId,
+                name: '新しいデッキ',
+                description: null,
+                newCardLimit: 20,
+                cardCount: 0,
+              },
+            },
+            { status: 201 },
+          )
+        }
+        if (path === '/api/study/dashboard') {
+          return Response.json(EMPTY_DASHBOARD)
+        }
+        if (path === '/api/study/decks') {
+          return Response.json({ learningDay: '2026-08-25', decks: [] })
+        }
+        return Response.json({
+          decks: [
+            {
+              id: '019fd000-0000-7000-8000-000000000010',
+              name: '太郎の英単語',
+              description: null,
+              newCardLimit: 20,
+              cardCount: 3,
+            },
+          ],
+        })
+      },
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <Routes>
+            <Route path="/" element={<DeckListScreen />} />
+            <Route path="/decks/:deckId" element={<p>デッキ詳細</p>} />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+    return { client, requested }
+  }
+
+  test('デッキを作ったら、そのデッキの画面へ移る', async () => {
+    renderRouted(guest)
+
+    fireEvent.change(await screen.findByLabelText('新しい単語帳'), {
+      target: { value: '新しいデッキ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'デッキを作成' }))
+
+    expect(await screen.findByText('デッキ詳細')).toBeTruthy()
+  })
+
+  test('名前が空白だけならデッキを作成できない', async () => {
+    renderRouted(guest)
+
+    fireEvent.change(await screen.findByLabelText('新しい単語帳'), {
+      target: { value: '   ' },
+    })
+
+    expect(
+      screen
+        .getByRole('button', { name: 'デッキを作成' })
+        .hasAttribute('disabled'),
+    ).toBe(true)
+  })
+
+  test('ログアウトしたら前の利用者の単語帳をキャッシュに残さない', async () => {
+    const { client } = renderRouted(user)
+
+    expect(await screen.findByText('太郎の英単語')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'ログアウト' }))
+
+    expect(await screen.findByRole('button', { name: 'はじめる' })).toBeTruthy()
+    await waitFor(() => {
+      expect(client.getQueryData(['decks'])).toBeUndefined()
+      expect(client.getQueryData(['dashboard'])).toBeUndefined()
+    })
+  })
+
+  test('アカウントの管理は折りたたんでおく', async () => {
+    // 連携や削除はめったに使わない。学習の導線より目立たせない。
+    renderRouted(user)
+
+    await screen.findByText('太郎の英単語')
+    const manage = screen.getByText('アカウントの管理').closest('details')
+    expect(manage?.open).toBe(false)
+    expect(manage?.textContent).toContain('アカウントを削除')
   })
 })

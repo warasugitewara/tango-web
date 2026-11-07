@@ -90,7 +90,10 @@ a {
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
@@ -98,7 +101,8 @@ input:focus-visible {
 .shell {
   width: min(1040px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 48px 0 72px;
+  /* 下端の項目が、画面下に出る取り消しの知らせに隠れないだけの余白。 */
+  padding: 48px 0 120px;
 }
 
 .welcome-shell {
@@ -246,9 +250,25 @@ button:disabled {
   cursor: pointer;
 }
 
-.account-actions a {
+.account-delete-link {
   color: var(--danger);
   font-size: 0.9rem;
+}
+
+/* 連携・統合・削除はめったに使わない。開いたときだけ1行を占める。 */
+.account-manage {
+  flex-basis: 100%;
+}
+
+.account-manage > summary {
+  width: fit-content;
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.account-manage[open] > summary {
+  margin-bottom: 10px;
 }
 
 .progress-panel {
@@ -349,6 +369,10 @@ button:disabled {
   flex-basis: 100%;
   margin: 0;
   color: var(--muted);
+}
+
+.account-manage .account-note {
+  margin-top: 10px;
 }
 
 .guest-warning {
@@ -786,6 +810,261 @@ textarea {
   display: grid;
   place-content: center;
   text-align: center;
+}
+
+/* ---- ログイン導線 ---- */
+
+.sign-in-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sign-in-buttons button {
+  padding: 10px 16px;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius-control);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* 最初の画面では「はじめる」が主役。ログインは控えめな枠線にする。 */
+.welcome-sign-in {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.welcome-sign-in > p {
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.welcome-sign-in .sign-in-buttons button {
+  color: var(--accent-strong);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+}
+
+/* ---- 知らせと取り消し ---- */
+
+.notice-slot:empty,
+.status-line:empty {
+  display: none;
+}
+
+/* 閉じる手段の無い知らせは、固定せずに本文の流れの中へ出す。 */
+.status-line {
+  margin: 16px 0;
+}
+
+/*
+ * 画面の下に固定して出す。一覧の下の方で消しても、知らせが画面外に出ない。
+ * iPhone のホームバーに重ならないよう、セーフエリアの分だけ持ち上げる。
+ */
+.notice-slot {
+  position: fixed;
+  z-index: 10;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  width: min(560px, calc(100% - 32px));
+  transform: translateX(-50%);
+}
+
+.notice-slot > * {
+  box-shadow: var(--shadow-popover);
+}
+
+.undo-notice,
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-left: 5px solid var(--accent);
+  border-radius: var(--radius-control);
+}
+
+.undo-notice > span {
+  flex: 1 1 auto;
+}
+
+.undo-notice button {
+  padding: 6px 12px;
+  color: var(--accent-strong);
+  background: transparent;
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius-control);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.undo-notice .notice-dismiss {
+  padding: 2px 10px;
+  color: var(--muted);
+  border-color: transparent;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.undo-notice .form-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* ---- フォームの補助 ---- */
+
+.form-hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.form-actions,
+.inline-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+}
+
+.quiet-button,
+.inline-links button {
+  padding: 8px 14px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.card-edit .quiet-button {
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  font-weight: 400;
+}
+
+/* ---- デッキ詳細: 日常の操作以外は畳む ---- */
+
+.panel-group {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.panel-group .content-panel {
+  margin-bottom: 0;
+}
+
+.panel-disclosure {
+  padding: 16px 24px;
+}
+
+.panel-disclosure > summary {
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.panel-disclosure[open] > summary {
+  margin-bottom: 16px;
+}
+
+.import-form input[type="file"] {
+  font: inherit;
+}
+
+.list-heading {
+  margin-bottom: 0;
+  font-size: 1.15rem;
+}
+
+/* ---- デッキ一覧 ---- */
+
+.deck-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.deck-title-link:hover {
+  text-decoration: underline;
+}
+
+/* 今日やることがあるデッキだけ、学習の導線を強める。 */
+.deck-actions a.deck-primary-action {
+  padding: 6px 14px;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-radius: var(--radius-control);
+  text-decoration: none;
+}
+
+/* ---- ゴミ箱 ---- */
+
+.trash-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.trash-section h2 {
+  margin-bottom: 0;
+}
+
+/* 長い本文で行が伸びきらないよう、2行で切る。 */
+.trash-card-front {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+/* ---- 学習 ---- */
+
+/* 操作できる要素ではないので、プログラムからのフォーカスに枠は出さない。 */
+.study-card:focus {
+  outline: none;
+}
+
+.key-hint {
+  justify-self: center;
+  min-width: 1.8em;
+  padding: 0 6px;
+  color: var(--muted);
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.reveal-button .key-hint {
+  margin-left: 10px;
+  color: var(--on-accent);
+  background: transparent;
+  border-color: var(--accent-soft);
+}
+
+.study-complete .inline-links {
+  justify-content: center;
+  margin-top: 12px;
+}
+
+/* キーボードが無い端末では、キーの手がかりは要らない。 */
+@media (hover: none) and (pointer: coarse) {
+  .key-hint {
+    display: none;
+  }
 }
 
 @media (max-width: 640px) {

@@ -1,17 +1,8 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { apiClient, type MergeCandidateView } from '../api/client'
-
-const PROVIDER_LABELS: Record<string, string> = {
-  google: 'Google',
-  github: 'GitHub',
-}
-
-function providerLabel(providers: readonly string[]): string {
-  return providers
-    .map((provider) => PROVIDER_LABELS[provider] ?? provider)
-    .join('・')
-}
+import { forgetSignedInData, queryKeys } from '../api/query-keys'
+import { providerLabels } from '../auth/providers'
 
 function dateLabel(lastReviewedAt: string | null): string {
   return lastReviewedAt === null ? '—' : lastReviewedAt.slice(0, 10)
@@ -24,7 +15,7 @@ function Column(props: { candidate: MergeCandidateView; heading: string }) {
     <div className="merge-column">
       <p className="merge-role">{heading}</p>
       <h2>{candidate.name}</h2>
-      <p>{providerLabel(candidate.providers)}でログイン</p>
+      <p>{providerLabels(candidate.providers, '・')}でログイン</p>
       <dl className="merge-figures">
         <div>
           <dt>単語帳</dt>
@@ -48,18 +39,28 @@ function Column(props: { candidate: MergeCandidateView; heading: string }) {
 }
 
 export function MergeScreen() {
+  const queryClient = useQueryClient()
   const preview = useQuery({
-    queryKey: ['merge-preview'],
+    queryKey: queryKeys.mergePreview,
     queryFn: () => apiClient.mergePreview(),
   })
 
   const confirm = useMutation({
     mutationFn: (keep: 'current' | 'other') => apiClient.confirmMerge(keep),
+    onSuccess: async (signedOut) => {
+      if (signedOut) {
+        forgetSignedInData(queryClient)
+        return
+      }
+      // 単語帳も名前も連携も変わる。持っているものは全部取り直させる。
+      await queryClient.invalidateQueries()
+    },
   })
 
   if (confirm.isSuccess) {
     return (
       <main className="shell">
+        <title>アカウントをまとめる | Tango</title>
         <h1>まとまりました</h1>
         {confirm.data ? (
           <p>
@@ -79,12 +80,18 @@ export function MergeScreen() {
   }
 
   if (preview.isPending) {
-    return <main className="shell">読み込み中…</main>
+    return (
+      <main className="shell">
+        <title>アカウントをまとめる | Tango</title>
+        読み込み中…
+      </main>
+    )
   }
 
   if (preview.isError) {
     return (
       <main className="shell">
+        <title>アカウントをまとめる | Tango</title>
         <h1>統合できませんでした</h1>
         <p className="error-panel">{preview.error.message}</p>
         <Link className="study-link" to="/">
@@ -98,6 +105,7 @@ export function MergeScreen() {
 
   return (
     <main className="shell">
+      <title>アカウントをまとめる | Tango</title>
       <header className="page-header">
         <div>
           <h1>アカウントをまとめる</h1>
