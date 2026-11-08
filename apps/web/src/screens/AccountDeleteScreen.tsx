@@ -1,24 +1,31 @@
 import { ACCOUNT_DELETE_CONFIRMATION } from '@tango/shared'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { apiClient } from '../api/client'
+import { forgetSignedInData, queryKeys } from '../api/query-keys'
 
 export function AccountDeleteScreen() {
+  const queryClient = useQueryClient()
   const [confirmation, setConfirmation] = useState('')
 
   const summary = useQuery({
-    queryKey: ['account-summary'],
+    queryKey: queryKeys.accountSummary,
     queryFn: () => apiClient.accountSummary(),
   })
 
   const remove = useMutation({
     mutationFn: () => apiClient.deleteAccount(ACCOUNT_DELETE_CONFIRMATION),
+    // 消したアカウントの単語帳を、最初の画面へ戻ったときに出さない。
+    onSuccess: () => {
+      forgetSignedInData(queryClient)
+    },
   })
 
   if (remove.isSuccess) {
     return (
       <main className="shell">
+        <title>アカウントを削除 | Tango</title>
         <h1>削除しました</h1>
         <p>
           アカウントと学習データを消しました。ご利用ありがとうございました。
@@ -49,6 +56,7 @@ export function AccountDeleteScreen() {
 
   return (
     <main className="shell">
+      <title>アカウントを削除 | Tango</title>
       <header className="page-header">
         <div>
           <h1>アカウントを削除</h1>

@@ -114,6 +114,10 @@ describe('TrashScreen', () => {
 
     expect(await screen.findByText(/ゴミ箱は空です/)).toBeTruthy()
     expect(restored).toContain(`/api/trash/decks/${DECK_ID}/restore`)
+    // 行が消えるだけでなく、何を戻したかを伝える。
+    expect(
+      screen.getByText('「英単語」を元の単語帳へ戻しました。'),
+    ).toBeTruthy()
   })
 
   test('カードを復元する', async () => {

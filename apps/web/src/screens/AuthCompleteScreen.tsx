@@ -72,7 +72,8 @@ export function AuthCompleteScreen() {
       try {
         await apiClient.completeIdentity(resolveMergeKey())
         sessionStorage.removeItem(MERGE_KEY_STORAGE_KEY)
-        await queryClient.invalidateQueries({ queryKey: ['session'] })
+        // ゲストの単語帳が正式アカウントへ移る。持っているものは全部取り直す。
+        await queryClient.invalidateQueries()
         await navigate('/', { replace: true })
       } catch (error) {
         // 失敗しても鍵は残す。同じ鍵で再試行すれば二重に統合されない。
@@ -90,6 +91,7 @@ export function AuthCompleteScreen() {
   if (failure === null) {
     return (
       <main className="shell">
+        <title>ログイン | Tango</title>
         <p>ログインを完了しています…</p>
       </main>
     )
@@ -97,6 +99,7 @@ export function AuthCompleteScreen() {
 
   return (
     <main className="shell error-panel">
+      <title>ログイン | Tango</title>
       <h1>ログインを完了できませんでした</h1>
       <p>{failure}</p>
       <p>

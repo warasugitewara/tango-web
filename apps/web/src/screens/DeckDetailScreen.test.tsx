@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import {
   afterAll,
@@ -72,6 +78,7 @@ function renderScreen(
   )
   const deckPatches: Array<Record<string, unknown>> = []
   const requestedPaths: string[] = []
+  const importBodies: string[] = []
   const cardListQueries: Array<{
     limit: string | null
     offset: string | null
@@ -144,6 +151,13 @@ function renderScreen(
       }
       return Response.json({ card: cards.at(-1) }, { status: 201 })
     }
+    if (init?.method === 'POST' && path === `/api/decks/${DECK_ID}/import`) {
+      importBodies.push(typeof init.body === 'string' ? init.body : '')
+      return Response.json({ created: 2 }, { status: 201 })
+    }
+    if (init?.method === 'POST' && path.endsWith('/restore')) {
+      return new Response(null, { status: 204 })
+    }
     if (init?.method === 'DELETE') {
       cards.pop()
       return new Response(null, { status: 204 })
@@ -165,12 +179,12 @@ function renderScreen(
     </MemoryRouter>,
   )
 
-  return { deckPatches, cardListQueries, requestedPaths }
+  return { deckPatches, cardListQueries, requestedPaths, importBodies }
 }
 
 describe('DeckDetailScreen', () => {
   test('学習リンクは濃色背景でも白文字で表示する', async () => {
-    renderScreen()
+    renderScreen({ cardCount: 1 })
 
     const studyLink = await screen.findByRole('link', {
       name: 'この単語帳を学習',
@@ -202,26 +216,128 @@ describe('DeckDetailScreen', () => {
     expect(screen.getAllByText('裏1').length).toBeGreaterThan(0)
   })
 
-  test('削除はゴミ箱へ入る旨を確認してから実行する', async () => {
+  test('カードが無ければ学習リンクを出さない', async () => {
     renderScreen()
-    fireEvent.change(await screen.findByLabelText('表'), {
-      target: { value: '表1' },
-    })
+
+    expect(await screen.findByText(/カードはまだありません/)).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'この単語帳を学習' })).toBeNull()
+  })
+
+  test('追加したら表の欄へフォーカスを戻し、続けて入れられる', async () => {
+    renderScreen()
+
+    const front = await screen.findByLabelText('表')
+    fireEvent.change(front, { target: { value: '表1' } })
     fireEvent.change(screen.getByLabelText('裏'), {
       target: { value: '裏1' },
     })
     fireEvent.click(screen.getByRole('button', { name: '追加' }))
-    await screen.findByText('表1')
 
-    const messages: string[] = []
-    vi.stubGlobal('confirm', (message: string) => {
-      messages.push(message)
-      return false
+    expect(await screen.findByText(/カードを追加しました/)).toBeTruthy()
+    expect(document.activeElement).toBe(front)
+    expect((front as HTMLTextAreaElement).value).toBe('')
+  })
+
+  test('Ctrl+Enterでカードを追加する', async () => {
+    renderScreen()
+
+    fireEvent.change(await screen.findByLabelText('表'), {
+      target: { value: '表1' },
     })
+    const back = screen.getByLabelText('裏')
+    fireEvent.change(back, { target: { value: '裏1' } })
+    fireEvent.keyDown(back, { key: 'Enter', ctrlKey: true })
+
+    expect(await screen.findByText(/カードを追加しました/)).toBeTruthy()
+  })
+
+  test('空白だけのカードは追加できない', async () => {
+    renderScreen()
+
+    fireEvent.change(await screen.findByLabelText('表'), {
+      target: { value: '   ' },
+    })
+    fireEvent.change(screen.getByLabelText('裏'), {
+      target: { value: '裏1' },
+    })
+
+    const add = screen.getByRole('button', { name: '追加' })
+    expect(add.hasAttribute('disabled')).toBe(true)
+  })
+
+  test('削除は確認を挟まず実行し、その場で元に戻せる', async () => {
+    // ゴミ箱から戻せる操作なので、毎回の確認より取り消しの手段を優先する。
+    const { requestedPaths } = renderScreen({ cardCount: 1 })
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirm)
+
+    await screen.findAllByText('表1')
     fireEvent.click(screen.getByRole('button', { name: '削除' }))
 
-    expect(messages).toHaveLength(1)
-    expect(messages[0]).toContain('ゴミ箱')
+    expect(await screen.findByText(/ゴミ箱へ移しました/)).toBeTruthy()
+    expect(confirm).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '元に戻す' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText(/ゴミ箱へ移しました/)).toBeNull()
+    })
+    expect(requestedPaths.some((path) => path.endsWith('/restore'))).toBe(true)
+  })
+
+  test('存在しないデッキなら見つからないと伝える', async () => {
+    renderScreen({ deck: null })
+
+    expect(
+      await screen.findByRole('heading', { name: '単語帳が見つかりません' }),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '追加' })).toBeNull()
+  })
+})
+
+describe('取り込み', () => {
+  test('CSVを選ぶと1行目の書き方を示す', async () => {
+    renderScreen()
+
+    fireEvent.change(await screen.findByLabelText('形式'), {
+      target: { value: 'csv' },
+    })
+
+    expect(screen.getByText(/1行目は「front,back」/)).toBeTruthy()
+  })
+
+  test('ファイルを選ぶと拡張子から形式を決めて内容を読み込む', async () => {
+    renderScreen()
+
+    const file = new File(['front,back\napple,りんご'], 'words.csv', {
+      type: 'text/csv',
+    })
+    fireEvent.change(await screen.findByLabelText('ファイルから読み込む'), {
+      target: { files: [file] },
+    })
+
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText('取り込み内容') as HTMLTextAreaElement).value,
+      ).toBe('front,back\napple,りんご')
+    })
+    expect((screen.getByLabelText('形式') as HTMLSelectElement).value).toBe(
+      'csv',
+    )
+  })
+
+  test('取り込みに成功したら内容を空にして二重取り込みを防ぐ', async () => {
+    const { importBodies } = renderScreen()
+
+    const payload = screen.getByLabelText('取り込み内容')
+    fireEvent.change(await screen.findByLabelText('取り込み内容'), {
+      target: { value: '{"schema":"tango.content"}' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '取り込む' }))
+
+    expect(await screen.findByText('2枚を作成しました。')).toBeTruthy()
+    expect((payload as HTMLTextAreaElement).value).toBe('')
+    expect(importBodies).toHaveLength(1)
   })
 })
 

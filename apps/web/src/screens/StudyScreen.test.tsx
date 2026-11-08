@@ -209,6 +209,85 @@ describe('StudyScreen', () => {
   })
 })
 
+describe('届いたか分からない評価の再送', () => {
+  // 送信は届いたが応答だけ失われた場合、別の評価を送ってもサーバは
+  // 記録済みの結果を返すか版の競合で捨てる。押した評価と記録が食い違わないよう、
+  // 再送が済むまでは最初の評価だけを選ばせる。
+  function renderFailingOnce() {
+    const bodies: Array<Record<string, unknown>> = []
+    const initial = studyView({ id: CARD_1, front: '表1', back: '裏1' })
+    renderScreen(async (input, init) => {
+      const route = routeOf(input)
+      if (route === '/api/security/csrf') {
+        return jsonResponse({ csrfToken: 'test-token' })
+      }
+      if (route === '/api/study/reviews' && init?.method === 'POST') {
+        bodies.push(
+          JSON.parse(typeof init.body === 'string' ? init.body : '{}'),
+        )
+        return bodies.length === 1
+          ? jsonResponse({}, 503)
+          : jsonResponse({ schedule: {} })
+      }
+      if (route === `/api/study/sessions/${SESSION_ID}`) {
+        return jsonResponse(
+          studyView({ id: CARD_2, front: '表2', back: '裏2' }),
+        )
+      }
+      return jsonResponse(initial, 201)
+    })
+    return { bodies }
+  }
+
+  test('失敗した評価以外のボタンは押せなくなる', async () => {
+    renderFailingOnce()
+
+    await screen.findByText('表1')
+    fireEvent.click(screen.getByRole('button', { name: '答えを見る' }))
+    fireEvent.click(screen.getByRole('button', { name: /普通/ }))
+
+    expect(await screen.findByText(/「普通」をもう一度押して/)).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /普通/ }).hasAttribute('disabled'),
+    ).toBe(false)
+    for (const label of [/もう一度/, /難しい/, /かんたん/]) {
+      expect(
+        screen.getByRole('button', { name: label }).hasAttribute('disabled'),
+      ).toBe(true)
+    }
+  })
+
+  test('別の評価のキーを押しても送らず、同じ評価なら同じ鍵で再送する', async () => {
+    const { bodies } = renderFailingOnce()
+
+    await screen.findByText('表1')
+    fireEvent.keyDown(window, { key: ' ' })
+    fireEvent.keyDown(window, { key: '3' })
+    await screen.findByText(/「普通」をもう一度押して/)
+
+    fireEvent.keyDown(window, { key: '4' })
+    expect(bodies).toHaveLength(1)
+
+    fireEvent.keyDown(window, { key: '3' })
+    expect(await screen.findByText('表2')).toBeTruthy()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]).toEqual(
+      expect.objectContaining({
+        rating: 3,
+        idempotencyKey: bodies[0]?.idempotencyKey,
+        responseDurationMs: bodies[0]?.responseDurationMs,
+      }),
+    )
+    // 次のカードでは、どの評価も選べる。
+    fireEvent.keyDown(window, { key: ' ' })
+    expect(
+      (await screen.findByRole('button', { name: /かんたん/ })).hasAttribute(
+        'disabled',
+      ),
+    ).toBe(false)
+  })
+})
+
 describe('直前の評価の取り消し', () => {
   const first = { id: CARD_1, front: '表1', back: '裏1' }
   const second = { id: CARD_2, front: '表2', back: '裏2' }
@@ -301,4 +380,219 @@ describe('直前の評価の取り消し', () => {
 
     expect(await screen.findByText(/取り消せる評価がありません/)).toBeTruthy()
   })
+})
+
+describe('キーボード操作', () => {
+  const first = { id: CARD_1, front: '表1', back: '裏1' }
+  const second = { id: CARD_2, front: '表2', back: '裏2' }
+
+  function renderStudy() {
+    const reviewBodies: Array<Record<string, unknown>> = []
+    renderScreen(async (input, init) => {
+      const route = routeOf(input)
+      if (route === '/api/security/csrf') {
+        return jsonResponse({ csrfToken: 'test-token' })
+      }
+      if (route === '/api/study/reviews' && init?.method === 'POST') {
+        reviewBodies.push(
+          JSON.parse(typeof init.body === 'string' ? init.body : '{}'),
+        )
+        return jsonResponse({ schedule: { scheduleVersion: 2 } })
+      }
+      if (route === `/api/study/sessions/${SESSION_ID}`) {
+        return jsonResponse(studyView(second))
+      }
+      return jsonResponse(studyView(first), 201)
+    })
+    return { reviewBodies }
+  }
+
+  test('Spaceで答えを出し、数字キーで評価する', async () => {
+    const { reviewBodies } = renderStudy()
+
+    await screen.findByText('表1')
+    fireEvent.keyDown(window, { key: ' ' })
+    expect(await screen.findByText('裏1')).toBeTruthy()
+
+    fireEvent.keyDown(window, { key: '4' })
+
+    expect(await screen.findByText('表2')).toBeTruthy()
+    expect(reviewBodies).toEqual([expect.objectContaining({ rating: 4 })])
+  })
+
+  test('答えを出す前の数字キーでは評価しない', async () => {
+    const { reviewBodies } = renderStudy()
+
+    await screen.findByText('表1')
+    fireEvent.keyDown(window, { key: '3' })
+
+    expect(screen.queryByText('裏1')).toBeNull()
+    expect(reviewBodies).toHaveLength(0)
+  })
+
+  test('ボタンにフォーカスがあるときのSpaceは横取りしない', async () => {
+    // ボタン上の Space は「そのボタンを押す」。二重に反応させない。
+    renderStudy()
+
+    await screen.findByText('表1')
+    const exit = screen.getByRole('link', { name: '← 終了' })
+    fireEvent.keyDown(exit, { key: ' ' })
+
+    expect(screen.queryByText('裏1')).toBeNull()
+  })
+
+  test('評価に応答時間を添えて送る', async () => {
+    const { reviewBodies } = renderStudy()
+
+    await screen.findByText('表1')
+    fireEvent.click(screen.getByRole('button', { name: '答えを見る' }))
+    fireEvent.click(screen.getByRole('button', { name: /普通/ }))
+
+    await screen.findByText('表2')
+    const duration = reviewBodies[0]?.responseDurationMs
+    expect(typeof duration).toBe('number')
+    expect(duration).toBeGreaterThanOrEqual(0)
+  })
+
+  test('ボタンに対応するキーを示す', async () => {
+    renderStudy()
+
+    await screen.findByText('表1')
+    fireEvent.click(screen.getByRole('button', { name: '答えを見る' }))
+
+    const easy = await screen.findByRole('button', { name: /かんたん/ })
+    expect(easy.getAttribute('aria-keyshortcuts')).toBe('4')
+  })
+})
+
+describe('学習の終わりと再開', () => {
+  test('学習できるカードが無ければ、その旨とデッキへの導線を出す', async () => {
+    const empty = {
+      ...studyView({ id: CARD_1, front: '表1', back: '裏1' }),
+      card: null,
+      schedule: null,
+      intervalPreviews: null,
+    }
+    renderScreen(async (input) =>
+      routeOf(input) === '/api/security/csrf'
+        ? jsonResponse({ csrfToken: 'test-token' })
+        : jsonResponse(empty, 201),
+    )
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'いま学習するカードはありません',
+      }),
+    ).toBeTruthy()
+    expect(
+      screen
+        .getByRole('link', { name: 'カードを追加する' })
+        .getAttribute('href'),
+    ).toBe(`/decks/${DECK_ID}`)
+  })
+
+  test('学習し終えたら、この回の枚数を出す', async () => {
+    const first = studyView({ id: CARD_1, front: '表1', back: '裏1' })
+    renderScreen(async (input, init) => {
+      const route = routeOf(input)
+      if (route === '/api/security/csrf') {
+        return jsonResponse({ csrfToken: 'test-token' })
+      }
+      if (route === '/api/study/reviews' && init?.method === 'POST') {
+        return jsonResponse({ schedule: { scheduleVersion: 2 } })
+      }
+      if (route === `/api/study/sessions/${SESSION_ID}`) {
+        return jsonResponse({
+          ...first,
+          card: null,
+          schedule: null,
+          intervalPreviews: null,
+        })
+      }
+      return jsonResponse(first, 201)
+    })
+
+    await screen.findByText('表1')
+    fireEvent.click(screen.getByRole('button', { name: '答えを見る' }))
+    fireEvent.click(screen.getByRole('button', { name: /普通/ }))
+
+    expect(
+      await screen.findByRole('heading', { name: '今日の学習は完了です' }),
+    ).toBeTruthy()
+    expect(screen.getByText('この回で1枚を学習しました。')).toBeTruthy()
+  })
+
+  test('画面を離れて戻ったら、学習セッションを作り直す', async () => {
+    // 古いセッションを使い回すと、カードを足しても「完了です」のまま残る。
+    let created = 0
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      if (routeOf(input) === '/api/security/csrf') {
+        return jsonResponse({ csrfToken: 'test-token' })
+      }
+      created += 1
+      return jsonResponse(
+        studyView({ id: CARD_1, front: `表${created}`, back: '裏' }),
+        201,
+      )
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const ui = (
+      <MemoryRouter initialEntries={['/study']}>
+        <QueryClientProvider client={client}>
+          <StudyScreen />
+        </QueryClientProvider>
+      </MemoryRouter>
+    )
+
+    const firstVisit = render(ui)
+    await screen.findByText('表1')
+    firstVisit.unmount()
+    // 捨てる処理はタイマーで走る。次の描画の前に一巡させる。
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    render(ui)
+    expect(await screen.findByText('表2')).toBeTruthy()
+    expect(created).toBe(2)
+  })
+})
+
+test('同じカードが続けて出たら、応答時間を出し直した時点から測る', async () => {
+  const same = studyView({ id: CARD_1, front: '表1', back: '裏1' })
+  const durations: number[] = []
+  let now = 1_000
+  vi.spyOn(performance, 'now').mockImplementation(() => now)
+  renderScreen(async (input, init) => {
+    const route = routeOf(input)
+    if (route === '/api/security/csrf') {
+      return jsonResponse({ csrfToken: 'test-token' })
+    }
+    if (route === '/api/study/reviews' && init?.method === 'POST') {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}')
+      durations.push(body.responseDurationMs)
+      return jsonResponse({ schedule: {} })
+    }
+    if (route === `/api/study/sessions/${SESSION_ID}`) {
+      return jsonResponse({
+        ...same,
+        schedule: { scheduleVersion: durations.length + 1 },
+      })
+    }
+    return jsonResponse(same, 201)
+  })
+
+  await screen.findByText('表1')
+  now = 6_000
+  fireEvent.keyDown(window, { key: ' ' })
+  fireEvent.keyDown(window, { key: '1' })
+  await waitFor(() => expect(durations).toHaveLength(1))
+  // 同じカードが再び出るまで待ってから、2回目の所要時間を作る。
+  await screen.findByRole('button', { name: '取り消す' })
+  now = 9_000
+  fireEvent.keyDown(window, { key: ' ' })
+  fireEvent.keyDown(window, { key: '1' })
+  await waitFor(() => expect(durations).toHaveLength(2))
+
+  expect(durations).toEqual([5_000, 3_000])
 })
