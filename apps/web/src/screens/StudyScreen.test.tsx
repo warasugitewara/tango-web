@@ -209,6 +209,85 @@ describe('StudyScreen', () => {
   })
 })
 
+describe('届いたか分からない評価の再送', () => {
+  // 送信は届いたが応答だけ失われた場合、別の評価を送ってもサーバは
+  // 記録済みの結果を返すか版の競合で捨てる。押した評価と記録が食い違わないよう、
+  // 再送が済むまでは最初の評価だけを選ばせる。
+  function renderFailingOnce() {
+    const bodies: Array<Record<string, unknown>> = []
+    const initial = studyView({ id: CARD_1, front: '表1', back: '裏1' })
+    renderScreen(async (input, init) => {
+      const route = routeOf(input)
+      if (route === '/api/security/csrf') {
+        return jsonResponse({ csrfToken: 'test-token' })
+      }
+      if (route === '/api/study/reviews' && init?.method === 'POST') {
+        bodies.push(
+          JSON.parse(typeof init.body === 'string' ? init.body : '{}'),
+        )
+        return bodies.length === 1
+          ? jsonResponse({}, 503)
+          : jsonResponse({ schedule: {} })
+      }
+      if (route === `/api/study/sessions/${SESSION_ID}`) {
+        return jsonResponse(
+          studyView({ id: CARD_2, front: '表2', back: '裏2' }),
+        )
+      }
+      return jsonResponse(initial, 201)
+    })
+    return { bodies }
+  }
+
+  test('失敗した評価以外のボタンは押せなくなる', async () => {
+    renderFailingOnce()
+
+    await screen.findByText('表1')
+    fireEvent.click(screen.getByRole('button', { name: '答えを見る' }))
+    fireEvent.click(screen.getByRole('button', { name: /普通/ }))
+
+    expect(await screen.findByText(/「普通」をもう一度押して/)).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /普通/ }).hasAttribute('disabled'),
+    ).toBe(false)
+    for (const label of [/もう一度/, /難しい/, /かんたん/]) {
+      expect(
+        screen.getByRole('button', { name: label }).hasAttribute('disabled'),
+      ).toBe(true)
+    }
+  })
+
+  test('別の評価のキーを押しても送らず、同じ評価なら同じ鍵で再送する', async () => {
+    const { bodies } = renderFailingOnce()
+
+    await screen.findByText('表1')
+    fireEvent.keyDown(window, { key: ' ' })
+    fireEvent.keyDown(window, { key: '3' })
+    await screen.findByText(/「普通」をもう一度押して/)
+
+    fireEvent.keyDown(window, { key: '4' })
+    expect(bodies).toHaveLength(1)
+
+    fireEvent.keyDown(window, { key: '3' })
+    expect(await screen.findByText('表2')).toBeTruthy()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]).toEqual(
+      expect.objectContaining({
+        rating: 3,
+        idempotencyKey: bodies[0]?.idempotencyKey,
+        responseDurationMs: bodies[0]?.responseDurationMs,
+      }),
+    )
+    // 次のカードでは、どの評価も選べる。
+    fireEvent.keyDown(window, { key: ' ' })
+    expect(
+      (await screen.findByRole('button', { name: /かんたん/ })).hasAttribute(
+        'disabled',
+      ),
+    ).toBe(false)
+  })
+})
+
 describe('直前の評価の取り消し', () => {
   const first = { id: CARD_1, front: '表1', back: '裏1' }
   const second = { id: CARD_2, front: '表2', back: '裏2' }

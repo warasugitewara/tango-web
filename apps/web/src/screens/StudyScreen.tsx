@@ -26,11 +26,20 @@ const RATING_BY_KEY: Readonly<Record<string, PublicRating>> = {
   '4': 4,
 }
 
-/** 再送では最初の鍵と測定値をそのまま使う。サーバは鍵で重複を見分ける。 */
+/**
+ * 送信中・送信に失敗した評価。再送では鍵と測定値をそのまま使う。
+ * サーバは鍵が一致すると評価の値を比べずに記録済みの結果を返すため、
+ * 鍵は「このカードにこの評価」という1回の送信に結び付ける。
+ */
 type PendingReview = {
   cardId: string
+  rating: PublicRating
   idempotencyKey: string
   responseDurationMs: number
+}
+
+function ratingLabel(rating: PublicRating): string {
+  return RATINGS.find((candidate) => candidate.rating === rating)?.label ?? ''
 }
 
 export function StudyScreen() {
@@ -39,6 +48,13 @@ export function StudyScreen() {
   const queryClient = useQueryClient()
   const [revealed, setRevealed] = useState(false)
   const pendingReview = useRef<PendingReview | null>(null)
+  // 送信に失敗した評価。届いたかどうか分からないあいだは、ほかの評価を選ばせない。
+  // 届いていた場合、別の評価を送っても（同じ鍵なら記録済みとして、別の鍵なら
+  // 版の競合として）黙って捨てられ、押した評価と記録が食い違うため。
+  const [unconfirmed, setUnconfirmed] = useState<{
+    cardId: string
+    rating: PublicRating
+  } | null>(null)
   // 取り消せるのは直前の1手だけ。評価してからボタンを出す。
   const [canUndo, setCanUndo] = useState(false)
   const pendingUndoKey = useRef<string | null>(null)
@@ -98,24 +114,27 @@ export function StudyScreen() {
       ) {
         throw new Error('評価するカードがありません。')
       }
-      // 同じカードへの再送なら、評価を押し直しても最初の鍵と測定値を使う。
-      // 届いていた場合はサーバが記録済みの結果を返し、二重に評価されない。
+      // 同じカードへの再送なら最初の鍵と測定値を使う。届いていた場合は
+      // サーバが記録済みの結果を返し、二重に評価されない。
       // 別のカードへ移っていたら（取り消しなど）、古い鍵は捨てる。
       const previous = pendingReview.current
-      const attempt: PendingReview =
-        previous !== null && previous.cardId === current.card.id
-          ? previous
-          : {
-              cardId: current.card.id,
-              idempotencyKey: crypto.randomUUID(),
-              responseDurationMs: Math.min(
-                MAX_RESPONSE_DURATION_MS,
-                Math.max(
-                  0,
-                  Math.round(performance.now() - cardShownAt.current),
-                ),
-              ),
-            }
+      const retrying = previous !== null && previous.cardId === current.card.id
+      if (retrying && previous.rating !== rating) {
+        throw new Error(
+          `「${ratingLabel(previous.rating)}」の再送が済むまで、ほかの評価は選べません。`,
+        )
+      }
+      const attempt: PendingReview = retrying
+        ? previous
+        : {
+            cardId: current.card.id,
+            rating,
+            idempotencyKey: crypto.randomUUID(),
+            responseDurationMs: Math.min(
+              MAX_RESPONSE_DURATION_MS,
+              Math.max(0, Math.round(performance.now() - cardShownAt.current)),
+            ),
+          }
       pendingReview.current = attempt
       await apiClient.submitReview({
         sessionId: current.sessionId,
@@ -129,6 +148,7 @@ export function StudyScreen() {
     },
     onSuccess: (next) => {
       pendingReview.current = null
+      setUnconfirmed(null)
       setCanUndo(true)
       setReviewedCount((count) => count + 1)
       showView(next)
@@ -142,11 +162,17 @@ export function StudyScreen() {
         session.data !== undefined
       ) {
         pendingReview.current = null
+        setUnconfirmed(null)
         try {
           showView(await apiClient.getStudySession(session.data.sessionId))
         } catch {
           // 取り直しにも失敗したら、今のカードを残す。押し直せば再送できる。
         }
+        return
+      }
+      const failed = pendingReview.current
+      if (failed !== null) {
+        setUnconfirmed({ cardId: failed.cardId, rating: failed.rating })
       }
     },
   })
@@ -177,6 +203,11 @@ export function StudyScreen() {
   const view = session.data
   const card = view?.card ?? null
   const busy = review.isPending || undo.isPending
+  // 届いたか分からない評価があれば、その評価だけを押せるようにする。
+  const lockedRating =
+    unconfirmed !== null && card !== null && unconfirmed.cardId === card.id
+      ? unconfirmed.rating
+      : null
 
   // 仕様のキーボード操作: Space で答え、1〜4 で評価。取り消しは Ctrl / ⌘ + Z。
   // 最新の状態を読むため、描画ごとに付け替える。
@@ -202,7 +233,11 @@ export function StudyScreen() {
         return
       }
       const rating = RATING_BY_KEY[event.key]
-      if (revealed && rating !== undefined) {
+      if (
+        revealed &&
+        rating !== undefined &&
+        (lockedRating === null || lockedRating === rating)
+      ) {
         event.preventDefault()
         review.mutate(rating)
       }
@@ -323,7 +358,9 @@ export function StudyScreen() {
             <button
               type="button"
               key={rating}
-              disabled={busy}
+              disabled={
+                busy || (lockedRating !== null && lockedRating !== rating)
+              }
               aria-keyshortcuts={String(rating)}
               onClick={() => review.mutate(rating)}
             >
@@ -373,7 +410,10 @@ export function StudyScreen() {
         review.error.code === 'STUDY_STATE_CONFLICT'
       ) ? (
         <p className="form-error" role="alert">
-          {review.error.message} 同じ評価をもう一度押して再送できます。
+          {review.error.message}
+          {lockedRating === null
+            ? null
+            : ` 「${ratingLabel(lockedRating)}」をもう一度押して再送してください。届いていた場合に記録と食い違わないよう、再送が済むまでほかの評価は選べません。`}
         </p>
       ) : null}
     </main>
